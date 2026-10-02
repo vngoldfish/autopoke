@@ -777,8 +777,7 @@
             addLog(`--------------------------------------------------`, "info");
             addLog(`🔎 KẾT QUẢ QUÉT DANH SÁCH CHUUSEN (${filterLabel}):`, "info");
 
-            const openList = [];
-            const appliedList = [];
+            const activeChuusenList = [];
             const upcomingList = [];
             let endedCount = 0;
 
@@ -803,13 +802,14 @@
                 const info = {
                     title: groupTitle,
                     items: itemDetails,
-                    timeRange: timeRange
+                    timeRange: timeRange,
+                    isApplied: isAlreadyApplied,
+                    frame: isUnverifiedFrame ? "本人未認証枠" : (isVerifiedFrame ? "本人認証済み枠" : "Khung khác")
                 };
 
-                if (isAlreadyApplied) {
-                    appliedList.push(info);
-                } else if (grpStatus === "30") {
-                    openList.push(info);
+                // Trạng thái đang diễn ra chuusen trên web ("30" = đang mở, "40" = đã nộp đơn)
+                if (grpStatus === "30" || grpStatus === "40") {
+                    activeChuusenList.push(info);
                 } else if (grpStatus === "20") {
                     upcomingList.push(info);
                 } else if (grpStatus === "50") {
@@ -817,22 +817,23 @@
                 }
             }
 
-            if (openList.length > 0) {
-                addLog(`🟢 ĐANG MỞ CHUUSEN (受付中 - ${openList.length} giải có thể nộp):`, "success");
-                openList.forEach((item, idx) => {
-                    addLog(`  👉 [${idx + 1}] ${item.title}`, "success");
-                    if (item.items) addLog(`     📦 Sản phẩm: ${item.items}`, "info");
-                    if (item.timeRange) addLog(`     ⏰ Hạn chót: ${item.timeRange}`, "info");
+            const unappliedCount = activeChuusenList.filter(it => !it.isApplied).length;
+            const appliedCount = activeChuusenList.filter(it => it.isApplied).length;
+
+            if (activeChuusenList.length > 0) {
+                addLog(`🎯 CÁC GIẢI ĐANG MỞ CHUUSEN TRÊN WEB (Tổng: ${activeChuusenList.length} giải):`, "success");
+                activeChuusenList.forEach((item, idx) => {
+                    addLog(`  📦 [${idx + 1}] ${item.title}`, "info");
+                    if (item.items) addLog(`     💰 Giá: ${item.items}`, "info");
+                    if (item.timeRange) addLog(`     ⏰ Hạn nộp: ${item.timeRange}`, "info");
+                    if (item.isApplied) {
+                        addLog(`     👉 Trạng thái nick này: ✅ ĐÃ NỘP ĐƠN THÀNH CÔNG (受付完了)`, "success");
+                    } else {
+                        addLog(`     👉 Trạng thái nick này: 🟢 CHƯA NỘP - SẴN SÀNG NỘP NGAY (受付中)`, "warn");
+                    }
                 });
             } else {
-                addLog(`🟡 Hiện không có giải nào đang mở chuusen (hoặc tài khoản này đã nộp hết).`, "warn");
-            }
-
-            if (appliedList.length > 0) {
-                addLog(`🔵 TÀI KHOẢN NÀY ĐÃ NỘP TRƯỚC ĐÓ (${appliedList.length} giải):`, "info");
-                appliedList.forEach((item, idx) => {
-                    addLog(`  ✔ [${idx + 1}] ${item.title}`, "info");
-                });
+                addLog(`🟡 Không có giải nào thuộc bộ lọc đang mở bốc thăm.`, "warn");
             }
 
             if (upcomingList.length > 0) {
@@ -844,10 +845,10 @@
 
             const openSpan = document.getElementById("pk-open-count");
             const appliedSpan = document.getElementById("pk-applied-count");
-            if (openSpan) openSpan.textContent = openList.length;
-            if (appliedSpan) appliedSpan.textContent = appliedList.length;
+            if (openSpan) openSpan.textContent = unappliedCount;
+            if (appliedSpan) appliedSpan.textContent = appliedCount;
 
-            addLog(`📊 Tổng kết bộ lọc: ${openList.length} giải chờ nộp | ${appliedList.length} giải đã nộp | ${upcomingList.length} giải sắp mở | ${endedCount} giải đã hết hạn.`, "info");
+            addLog(`📊 TỔNG KẾT: Có ${activeChuusenList.length} giải đang chuusen | Nick này đã nộp: ${appliedCount} giải | Còn cần nộp: ${unappliedCount} giải.`, "info");
             addLog(`--------------------------------------------------`, "info");
 
         } catch (err) {
