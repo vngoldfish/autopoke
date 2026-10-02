@@ -8,5 +8,10 @@
     "name": "TaiKhoan_2",
     "enabled": true,
     "proxy": ""
+  },
+  {
+    "name": "taikhoan1@gmail.com",
+    "enabled": true,
+    "proxy": ""
   }
 ]

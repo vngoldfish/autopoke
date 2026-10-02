@@ -8,9 +8,10 @@ screenshots/
 *.png
 !pokemon-lottery-extension/icon.png
 
-# Sensitive HAR and logs
+# Sensitive HAR, accounts and logs
 *.har
 *.log
+accounts.json
 
 # Python
 __pycache__/

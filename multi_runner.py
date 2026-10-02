@@ -29,10 +29,12 @@ if sys.platform.startswith("win"):
         pass
 
 from playwright.sync_api import sync_playwright
+from otp_reader import fetch_pokemon_otp_from_gmail
 
 BASE_DIR = Path(__file__).resolve().parent
 PROFILES_DIR = BASE_DIR / "profiles"
 SCREENSHOTS_DIR = BASE_DIR / "screenshots"
+ACCOUNTS_FILE = BASE_DIR / "accounts.json"
 CONFIG_FILE = BASE_DIR / "profiles.json"
 EXTENSION_DIR = BASE_DIR / "pokemon-lottery-extension"
 
@@ -49,23 +51,32 @@ def log(msg, level="INFO"):
     print(f"[{timestamp}] {prefix} {msg}")
 
 def load_profiles():
-    if not CONFIG_FILE.exists():
+    # Ưu tiên đọc từ accounts.json nếu có
+    target_file = ACCOUNTS_FILE if ACCOUNTS_FILE.exists() else CONFIG_FILE
+    if not target_file.exists():
         default_config = [
-            {"name": "TaiKhoan_1", "enabled": True, "proxy": ""},
-            {"name": "TaiKhoan_2", "enabled": True, "proxy": ""}
+            {
+                "name": "Nick_1",
+                "enabled": True,
+                "pokemon_email": "",
+                "pokemon_password": "",
+                "gmail_app_password": "",
+                "proxy": ""
+            }
         ]
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        with open(target_file, "w", encoding="utf-8") as f:
             json.dump(default_config, f, indent=2, ensure_ascii=False)
         return default_config
     try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+        with open(target_file, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
-        log(f"Lỗi đọc file profiles.json: {e}", "ERROR")
+        log(f"Lỗi đọc file cấu hình tài khoản: {e}", "ERROR")
         return []
 
 def save_profiles(profiles):
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+    target_file = ACCOUNTS_FILE if ACCOUNTS_FILE.exists() else CONFIG_FILE
+    with open(target_file, "w", encoding="utf-8") as f:
         json.dump(profiles, f, indent=2, ensure_ascii=False)
 
 def get_launch_args(profile_path, proxy=None):
@@ -122,6 +133,126 @@ def setup_account(name):
             pass
         log(f"Đã lưu xong phiên đăng nhập cho tài khoản [{name}]!", "SUCCESS")
 
+def handle_login_and_otp(page, account):
+    """Tự động điền tài khoản, mật khẩu và đọc mã OTP từ Gmail nếu cần."""
+    name = account.get("name", "Unknown")
+    email_val = account.get("pokemon_email", "").strip()
+    pwd_val = account.get("pokemon_password", "").strip()
+    app_pwd = account.get("gmail_app_password", "").strip()
+
+    if not email_val or not pwd_val:
+        log(f"[{name}] Chưa cấu hình pokemon_email/pokemon_password trong accounts.json", "WARN")
+        return False
+
+    current_url = page.url.lower()
+
+    # 1. Nếu đang ở trang đăng nhập
+    if "login" in current_url and "mfa" not in current_url:
+        log(f"[{name}] Đang tự động điền Email và Mật khẩu...", "INFO")
+        time.sleep(2)
+
+        email_selectors = [
+            'input[name="loginID"]',
+            'input[name="email"]',
+            'input[type="email"]',
+            '#loginId',
+            '#mailAddress',
+            'input[placeholder*="メール"]'
+        ]
+        for sel in email_selectors:
+            loc = page.locator(sel)
+            if loc.count() > 0 and loc.first.is_visible():
+                loc.first.fill(email_val)
+                break
+
+        time.sleep(0.5)
+        pwd_selectors = [
+            'input[name="password"]',
+            'input[type="password"]',
+            '#password',
+            'input[placeholder*="パスワード"]'
+        ]
+        for sel in pwd_selectors:
+            loc = page.locator(sel)
+            if loc.count() > 0 and loc.first.is_visible():
+                loc.first.fill(pwd_val)
+                break
+
+        time.sleep(1)
+        btn_selectors = [
+            'button[type="submit"]',
+            'input[type="submit"]',
+            '#loginBtn',
+            '.loginBtn',
+            'a.comBtn01',
+            'button:has-text("ログイン")',
+            'a:has-text("ログイン")'
+        ]
+        for sel in btn_selectors:
+            loc = page.locator(sel)
+            if loc.count() > 0 and loc.first.is_visible():
+                log(f"[{name}] Đang bấm nút Đăng nhập...", "INFO")
+                loc.first.click()
+                break
+
+        time.sleep(5)
+
+    # 2. Kiểm tra nếu chuyển hướng sang trang nhập Passcode/OTP
+    current_url = page.url.lower()
+    if "mfa" in current_url or "passcode" in current_url:
+        log(f"[{name}] Đã đến trang nhập mã xác thực OTP (login-mfa.html)!", "WARN")
+        if not app_pwd:
+            log(f"[{name}] Chưa cài đặt gmail_app_password trong accounts.json để tự đọc OTP!", "ERROR")
+            return False
+
+        log(f"[{name}] Đang kết nối Gmail để đọc mã OTP tự động...", "INFO")
+        otp_code = fetch_pokemon_otp_from_gmail(email_val, app_pwd, timeout_seconds=90)
+
+        if not otp_code:
+            log(f"[{name}] Không nhận được mã OTP từ Gmail!", "ERROR")
+            return False
+
+        log(f"[{name}] -> TÌM THẤY MÃ OTP: [{otp_code}]. Đang điền vào trang web...", "SUCCESS")
+        otp_selectors = [
+            'input[name="passcode"]',
+            'input[name="code"]',
+            '#passcode',
+            'input[type="text"]',
+            'input[type="number"]'
+        ]
+        for sel in otp_selectors:
+            loc = page.locator(sel)
+            if loc.count() > 0 and loc.first.is_visible():
+                loc.first.fill(otp_code)
+                break
+
+        time.sleep(1)
+        auth_btn_selectors = [
+            'button[type="submit"]',
+            '#authBtn',
+            '#verifyBtn',
+            'input[type="submit"]',
+            'button:has-text("認証")',
+            'a:has-text("認証")',
+            'button:has-text("送信")'
+        ]
+        for sel in auth_btn_selectors:
+            loc = page.locator(sel)
+            if loc.count() > 0 and loc.first.is_visible():
+                log(f"[{name}] Bấm nút Xác thực OTP...", "INFO")
+                loc.first.click()
+                break
+
+        time.sleep(5)
+
+    # 3. Kiểm tra xem đã vào được trang bốc thăm chưa
+    if "apply.html" in page.url.lower():
+        log(f"[{name}] Đăng nhập thành công và đã vào trang bốc thăm!", "SUCCESS")
+        return True
+    elif "login" not in page.url.lower():
+        return True
+    return False
+
 def run_single_account(p, account):
     """Thực thi quy trình đăng ký cho một tài khoản cụ thể."""
     name = account.get("name", "Unknown")
@@ -147,12 +278,15 @@ def run_single_account(p, account):
         page.goto(LOTTERY_APPLY_URL, wait_until="domcontentloaded", timeout=60000)
         time.sleep(3)
 
-        # Kiểm tra nếu bị redirect sang trang đăng nhập
-        if "login" in page.url.lower():
-            log(f"[{name}] CẢNH BÁO: Tài khoản này chưa đăng nhập hoặc đã hết hạn session!", "WARN")
-            log(f"[{name}] Hãy chạy: python multi_runner.py --setup {name} để đăng nhập lại.", "WARN")
-            context.close()
-            return {"name": name, "status": "CHƯA_ĐĂNG_NHẬP", "detail": "Session hết hạn hoặc chưa login"}
+        # Nếu phát hiện trang login hoặc mfa -> Thực hiện tự động đăng nhập & đọc OTP từ Gmail
+        if "login" in page.url.lower() or "mfa" in page.url.lower():
+            log(f"[{name}] Phiên đăng nhập cần xác thực. Đang tiến hành đăng nhập tự động...", "INFO")
+            ok = handle_login_and_otp(page, account)
+            if not ok and ("login" in page.url.lower() or "mfa" in page.url.lower()):
+                log(f"[{name}] Không thể hoàn thành đăng nhập tự động!", "WARN")
+                context.close()
+                return {"name": name, "status": "LỖI_ĐĂNG_NHẬP", "detail": "Không thể vượt qua login/OTP"}
+            time.sleep(3)
 
         # Đợi Gigya và Extension tự động chạy
         log(f"[{name}] Đang chờ Extension quét và xử lý (tối đa 25 giây)...")

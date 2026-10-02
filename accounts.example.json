@@ -1,0 +1,18 @@
+[
+  {
+    "name": "Nick_1",
+    "enabled": true,
+    "pokemon_email": "diachi_gmail_1@gmail.com",
+    "pokemon_password": "mat_khau_pokemon_1",
+    "gmail_app_password": "xxxx xxxx xxxx xxxx",
+    "proxy": ""
+  },
+  {
+    "name": "Nick_2",
+    "enabled": true,
+    "pokemon_email": "diachi_gmail_2@gmail.com",
+    "pokemon_password": "mat_khau_pokemon_2",
+    "gmail_app_password": "yyyy yyyy yyyy yyyy",
+    "proxy": ""
+  }
+]
