@@ -172,42 +172,78 @@
     // Điền và xác thực mã OTP
     function fillAndSubmitOtp(code) {
         if (!code) return;
-        addLog(`Đang điền mã OTP [${code}] vào ô Passcode...`, "info");
-        const selectors = [
-            'input[name="passcode"]',
-            'input[name="code"]',
-            '#passcode',
-            'input[type="text"]',
-            'input[type="number"]'
-        ];
-        let filled = false;
-        for (const sel of selectors) {
-            const el = document.querySelector(sel);
-            if (el) {
-                el.value = code;
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-                filled = true;
-                break;
-            }
+        addLog(`Đang tìm ô Passcode và điền mã OTP [${code}]...`, "info");
+
+        // Tìm tất cả các ô input trên trang LOẠI TRỪ container của Bot
+        const candidateInputs = Array.from(document.querySelectorAll('input')).filter(input => {
+            if (input.closest('#pk-auto-bot-container')) return false;
+            const type = (input.type || 'text').toLowerCase();
+            return !['hidden', 'submit', 'button', 'checkbox', 'radio'].includes(type);
+        });
+
+        if (candidateInputs.length === 0) {
+            addLog("Không tìm thấy ô nhập Passcode trên trang web!", "err");
+            return;
         }
-        if (filled) {
-            addLog("Đã điền xong mã OTP. Đang tự động bấm nút Xác thực...", "success");
-            setTimeout(() => {
-                const btnSelectors = ['button[type="submit"]', '#authBtn', '#verifyBtn', 'input[type="submit"]', 'button', 'a'];
-                for (const bSel of btnSelectors) {
-                    const btns = Array.from(document.querySelectorAll(bSel));
-                    const targetBtn = btns.find(b => b.textContent && (b.textContent.includes("認証") || b.textContent.includes("送信") || b.textContent.includes("次へ")));
-                    if (targetBtn) {
-                        targetBtn.click();
-                        addLog("Đã bấm nút xác thực! Đang chờ chuyển hướng...", "success");
-                        return;
-                    }
+
+        // Ưu tiên ô có tên passcode hoặc placeholder liên quan
+        let targetInput = candidateInputs.find(i => 
+            (i.name && i.name.toLowerCase().includes("passcode")) ||
+            (i.id && i.id.toLowerCase().includes("passcode")) ||
+            (i.placeholder && i.placeholder.includes("パスコード"))
+        ) || candidateInputs[0];
+
+        addLog(`Đã xác định ô nhập Passcode: <${targetInput.tagName.toLowerCase()} name="${targetInput.name || ''}" id="${targetInput.id || ''}">`, "info");
+
+        // Focus vào ô input
+        targetInput.focus();
+
+        // Sử dụng native value setter để cập nhật cả Vue/React State
+        try {
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+            nativeInputValueSetter.call(targetInput, code);
+        } catch (e) {
+            targetInput.value = code;
+        }
+
+        // Kích hoạt đầy đủ các sự kiện input, change, keyup để trang nhận diện
+        targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+        targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+        targetInput.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+
+        // Nếu có jQuery thì kích hoạt thêm qua jQuery
+        if (window.$) {
+            try {
+                window.$(targetInput).val(code).trigger('input').trigger('change');
+            } catch (e) {}
+        }
+
+        targetInput.blur();
+        addLog("Đã điền mã OTP thành công. Đang chờ hệ thống xác nhận và bấm nút...", "success");
+
+        // Chờ 800ms để form validation của trang cập nhật trạng thái hợp lệ
+        setTimeout(() => {
+            // Tìm nút xác thực (Loại trừ container của Bot)
+            const candidateButtons = Array.from(document.querySelectorAll('button, input[type="submit"], a.btn, a.comBtn, a')).filter(btn => {
+                if (btn.closest('#pk-auto-bot-container')) return false;
+                const txt = (btn.textContent || btn.value || '').trim();
+                return txt.includes('認証') || txt.includes('送信') || txt.includes('次へ') || 
+                       btn.id === 'authBtn' || btn.id === 'verifyBtn';
+            });
+
+            if (candidateButtons.length > 0) {
+                const targetBtn = candidateButtons[0];
+                addLog(`Đang bấm nút xác thực: "${(targetBtn.textContent || targetBtn.value || '').trim()}"...`, "info");
+                targetBtn.focus();
+                targetBtn.click();
+                if (window.$) {
+                    try { window.$(targetBtn).trigger('click'); } catch (e) {}
                 }
-            }, 1000);
-        } else {
-            addLog("Không tìm thấy ô nhập Passcode trên trang!", "err");
-        }
+                addLog("Đã gửi yêu cầu xác thực! Đang chờ chuyển hướng vào trang bốc thăm...", "success");
+            } else {
+                addLog("Đã điền xong OTP! Vui lòng tự bấm nút '認証' trên trang nếu bot chưa tự click.", "warn");
+            }
+        }, 800);
     }
 
     // Kết nối tới OTP Server cục bộ (127.0.0.1:8765) để lấy mã từ Gmail
