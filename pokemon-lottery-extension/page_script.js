@@ -172,7 +172,12 @@
     // Điền và xác thực mã OTP
     function fillAndSubmitOtp(code) {
         if (!code) return;
+        code = code.trim();
         addLog(`Đang tìm ô Passcode và điền mã OTP [${code}]...`, "info");
+
+        // Cập nhật lên ô input dự phòng của widget để người dùng nhìn thấy
+        const manualInput = document.getElementById("pk-manual-otp");
+        if (manualInput) manualInput.value = code;
 
         // Tìm tất cả các ô input trên trang LOẠI TRỪ container của Bot
         const candidateInputs = Array.from(document.querySelectorAll('input')).filter(input => {
@@ -186,44 +191,60 @@
             return;
         }
 
-        // Ưu tiên ô có tên passcode hoặc placeholder liên quan
-        let targetInput = candidateInputs.find(i => 
-            (i.name && i.name.toLowerCase().includes("passcode")) ||
-            (i.id && i.id.toLowerCase().includes("passcode")) ||
-            (i.placeholder && i.placeholder.includes("パスコード"))
-        ) || candidateInputs[0];
+        // Trường hợp 1: Có 6 ô nhập 1 chữ số (digit-by-digit)
+        const digitInputs = candidateInputs.filter(i => i.maxLength === 1 || i.size === 1);
+        if (digitInputs.length === 6 && code.length === 6) {
+            addLog("Phát hiện 6 ô nhập từng chữ số OTP...", "info");
+            for (let idx = 0; idx < 6; idx++) {
+                const inp = digitInputs[idx];
+                const char = code[idx];
+                inp.focus();
+                try {
+                    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                    setter.call(inp, char);
+                } catch(e) {
+                    inp.value = char;
+                }
+                inp.dispatchEvent(new Event('input', { bubbles: true }));
+                inp.dispatchEvent(new Event('change', { bubbles: true }));
+                inp.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: char }));
+            }
+        } else {
+            // Trường hợp 2: Ô nhập chuỗi 6 ký tự
+            let targetInput = candidateInputs.find(i => 
+                (i.name && i.name.toLowerCase().includes("passcode")) ||
+                (i.id && i.id.toLowerCase().includes("passcode")) ||
+                (i.placeholder && i.placeholder.includes("パスコード")) ||
+                (i.name && i.name.toLowerCase().includes("code"))
+            ) || candidateInputs[0];
 
-        addLog(`Đã xác định ô nhập Passcode: <${targetInput.tagName.toLowerCase()} name="${targetInput.name || ''}" id="${targetInput.id || ''}">`, "info");
+            addLog(`Đã xác định ô nhập Passcode: <${targetInput.tagName.toLowerCase()} name="${targetInput.name || ''}" id="${targetInput.id || ''}">`, "info");
 
-        // Focus vào ô input
-        targetInput.focus();
-
-        // Sử dụng native value setter để cập nhật cả Vue/React State
-        try {
-            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-            nativeInputValueSetter.call(targetInput, code);
-        } catch (e) {
-            targetInput.value = code;
-        }
-
-        // Kích hoạt đầy đủ các sự kiện input, change, keyup để trang nhận diện
-        targetInput.dispatchEvent(new Event('input', { bubbles: true }));
-        targetInput.dispatchEvent(new Event('change', { bubbles: true }));
-        targetInput.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
-
-        // Nếu có jQuery thì kích hoạt thêm qua jQuery
-        if (window.$) {
+            targetInput.focus();
             try {
-                window.$(targetInput).val(code).trigger('input').trigger('change');
-            } catch (e) {}
+                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                nativeInputValueSetter.call(targetInput, code);
+            } catch (e) {
+                targetInput.value = code;
+            }
+
+            // Kích hoạt toàn bộ sự kiện giả lập gõ phím
+            targetInput.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
+            targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+            targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+            targetInput.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+
+            if (window.$) {
+                try {
+                    window.$(targetInput).val(code).trigger('input').trigger('change');
+                } catch (e) {}
+            }
         }
 
-        targetInput.blur();
-        addLog("Đã điền mã OTP thành công. Đang chờ hệ thống xác nhận và bấm nút...", "success");
+        addLog("Đã điền mã OTP thành công. Đang chờ hệ thống kiểm tra và bấm nút...", "success");
 
-        // Chờ 800ms để form validation của trang cập nhật trạng thái hợp lệ
+        // Chờ 1 giây để form validation cập nhật
         setTimeout(() => {
-            // Tìm nút xác thực (Loại trừ container của Bot)
             const candidateButtons = Array.from(document.querySelectorAll('button, input[type="submit"], a.btn, a.comBtn, a')).filter(btn => {
                 if (btn.closest('#pk-auto-bot-container')) return false;
                 const txt = (btn.textContent || btn.value || '').trim();
@@ -239,15 +260,28 @@
                 if (window.$) {
                     try { window.$(targetBtn).trigger('click'); } catch (e) {}
                 }
-                addLog("Đã gửi yêu cầu xác thực! Đang chờ chuyển hướng vào trang bốc thăm...", "success");
+                addLog("Đã gửi xác thực! Đang chờ chuyển hướng...", "success");
             } else {
-                addLog("Đã điền xong OTP! Vui lòng tự bấm nút '認証' trên trang nếu bot chưa tự click.", "warn");
+                addLog("Đã điền xong OTP! Vui lòng bấm nút '認証' trên màn hình nếu bot chưa tự click.", "warn");
             }
-        }, 800);
+        }, 1000);
     }
 
     // Kết nối tới OTP Server cục bộ (127.0.0.1:8765) để lấy mã từ Gmail
+    let isFetchingOtp = false;
     async function fetchOtpFromLocalServer() {
+        if (isFetchingOtp) {
+            addLog("Đang trong quá trình quét Gmail, vui lòng đợi...", "warn");
+            return;
+        }
+
+        const btnFetchOtp = document.getElementById("pk-btn-fetch-otp");
+        isFetchingOtp = true;
+        if (btnFetchOtp) {
+            btnFetchOtp.disabled = true;
+            btnFetchOtp.textContent = "⏳ ĐANG QUÉT GMAIL CHỜ MÃ...";
+        }
+
         addLog("Đang kết nối tới OTP Server (127.0.0.1:8765) để đọc Gmail...", "info");
         try {
             const res = await fetch("http://127.0.0.1:8765/get-otp");
@@ -265,10 +299,16 @@
                 addLog(`-> TÌM THẤY MÃ OTP: ${data.otp}!`, "success");
                 fillAndSubmitOtp(data.otp);
             } else {
-                addLog(`Chưa nhận được OTP: ${data.error || 'Thử lại sau ít giây'}`, "warn");
+                addLog(`Chưa nhận được OTP: ${data.error || 'Hãy thử lại sau ít giây'}`, "warn");
             }
         } catch(e) {
-            addLog("Không thể kết nối tới OTP Server! Hãy bấm đúp chạy file 'chay_otp_server.bat'.", "err");
+            addLog("Không thể kết nối tới OTP Server! Hãy chắc chắn file 'chay_otp_server.bat' đang mở.", "err");
+        } finally {
+            isFetchingOtp = false;
+            if (btnFetchOtp) {
+                btnFetchOtp.disabled = false;
+                btnFetchOtp.textContent = "📩 ĐỌC OTP GMAIL & TỰ ĐIỀN";
+            }
         }
     }
 

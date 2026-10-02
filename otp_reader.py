@@ -1,160 +1,231 @@
 """
 Module: otp_reader.py
-Chức năng: Tự động kết nối Gmail qua giao thức IMAP, đọc thư mới nhất từ Pokemon Center Online và trích xuất mã OTP.
+Chức năng: Tự động kết nối Gmail qua IMAP, đọc thư mới nhất từ Pokémon Center Online và trích xuất mã OTP nhanh chóng, ổn định.
 """
 
 import imaplib
 import email
 from email.header import decode_header
+import email.utils
+import datetime
 import re
 import time
-from datetime import datetime
+import sys
 
 def decode_mime_words(s):
     """Giải mã tiêu đề email tiếng Nhật/UTF-8."""
     if not s:
         return ""
-    decoded_fragments = decode_header(s)
-    header_text = []
-    for fragment, encoding in decoded_fragments:
-        if isinstance(fragment, bytes):
-            try:
-                header_text.append(fragment.decode(encoding or "utf-8", errors="ignore"))
-            except Exception:
-                header_text.append(fragment.decode("utf-8", errors="ignore"))
-        else:
-            header_text.append(str(fragment))
-    return "".join(header_text)
+    try:
+        decoded_fragments = decode_header(s)
+        header_text = []
+        for fragment, encoding in decoded_fragments:
+            if isinstance(fragment, bytes):
+                try:
+                    header_text.append(fragment.decode(encoding or "utf-8", errors="ignore"))
+                except Exception:
+                    header_text.append(fragment.decode("utf-8", errors="ignore"))
+            else:
+                header_text.append(str(fragment))
+        return "".join(header_text)
+    except Exception:
+        return str(s)
 
 def get_email_body(msg):
-    """Trích xuất nội dung văn bản từ email (hỗ trợ cả plain text và html)."""
+    """Trích xuất nội dung văn bản plain text/html từ email."""
     body = ""
-    if msg.is_multipart():
-        for part in msg.walk():
-            content_type = part.get_content_type()
-            content_disposition = str(part.get("Content-Disposition"))
-            if content_type in ["text/plain", "text/html"] and "attachment" not in content_disposition:
-                payload = part.get_payload(decode=True)
-                if payload:
-                    charset = part.get_content_charset() or "utf-8"
-                    try:
-                        body += payload.decode(charset, errors="ignore") + "\n"
-                    except Exception:
-                        body += payload.decode("utf-8", errors="ignore") + "\n"
-    else:
-        payload = msg.get_payload(decode=True)
-        if payload:
-            charset = msg.get_content_charset() or "utf-8"
-            try:
-                body = payload.decode(charset, errors="ignore")
-            except Exception:
-                body = payload.decode("utf-8", errors="ignore")
+    try:
+        if msg.is_multipart():
+            for part in msg.walk():
+                content_type = part.get_content_type()
+                content_disposition = str(part.get("Content-Disposition"))
+                if content_type in ["text/plain", "text/html"] and "attachment" not in content_disposition:
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        charset = part.get_content_charset() or "utf-8"
+                        try:
+                            body += payload.decode(charset, errors="ignore") + "\n"
+                        except Exception:
+                            body += payload.decode("utf-8", errors="ignore") + "\n"
+        else:
+            payload = msg.get_payload(decode=True)
+            if payload:
+                charset = msg.get_content_charset() or "utf-8"
+                try:
+                    body = payload.decode(charset, errors="ignore")
+                except Exception:
+                    body = payload.decode("utf-8", errors="ignore")
+    except Exception:
+        pass
     return body
 
-def fetch_pokemon_otp_from_gmail(gmail_address, app_password, timeout_seconds=90, poll_interval=3):
+def extract_otp_code(text):
+    """Tìm mã OTP 6 chữ số trong văn bản email Pokémon Center."""
+    if not text:
+        return None
+    patterns = [
+        r"【パスコード】\s*([0-9]{6})",
+        r"パスコード[：:\s]*([0-9]{6})",
+        r"認証コード[：:\s]*([0-9]{6})",
+        r"【([0-9]{6})】",
+        r"\b([0-9]{6})\b"
+    ]
+    for pat in patterns:
+        match = re.search(pat, text)
+        if match:
+            return match.group(1)
+    return None
+
+def fetch_pokemon_otp_from_gmail(gmail_address, app_password, timeout_seconds=60, poll_interval=2, ignore_otps=None):
     """
     Kết nối vào Gmail và chờ thư OTP mới từ Pokémon Center Online.
     
-    :param gmail_address: Địa chỉ Gmail (VD: user@gmail.com)
+    :param gmail_address: Địa chỉ Gmail
     :param app_password: Mật khẩu ứng dụng 16 ký tự của Gmail (App Password)
-    :param timeout_seconds: Thời gian tối đa chờ thư OTP (mặc định 90 giây)
-    :param poll_interval: Khoảng thời gian kiểm tra lại hòm thư (mặc định 3 giây)
-    :return: Chuỗi 6 chữ số OTP hoặc None nếu quá thời gian
+    :param timeout_seconds: Thời gian tối đa chờ thư OTP (mặc định 60 giây)
+    :param poll_interval: Chu kỳ kiểm tra hòm thư (2 giây)
+    :param ignore_otps: Tập hợp các mã OTP đã cũ/đã sử dụng để tránh nhận lại mã cũ
+    :return: Chuỗi 6 chữ số OTP hoặc None nếu hết thời gian
     """
+    if ignore_otps is None:
+        ignore_otps = set()
+
+    clean_email = gmail_address.strip()
+    clean_pwd = app_password.replace(" ", "").strip()
     start_time = time.time()
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] [MAIL] Đang kết nối vào hòm thư Gmail: {gmail_address}...")
+    
+    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MAIL] Đang kết nối vào Gmail: {clean_email}...")
+
+    mail = None
+    # Thử kết nối IMAP tối đa 3 lần nếu Google bị nghẽn
+    for attempt in range(1, 4):
+        try:
+            mail = imaplib.IMAP4_SSL("imap.gmail.com", 993, timeout=30)
+            mail.login(clean_email, clean_pwd)
+            break
+        except Exception as e:
+            print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MAIL] Lỗi kết nối lần {attempt}: {e}")
+            if attempt < 3:
+                time.sleep(2)
+            else:
+                print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [LỖI MAIL] Không thể kết nối tới Gmail sau 3 lần thử.")
+                return None
 
     try:
-        mail = imaplib.IMAP4_SSL("imap.gmail.com", 993)
-        mail.login(gmail_address.strip(), app_password.replace(" ", "").strip())
-        mail.select("INBOX")
-    except Exception as e:
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] [LỖI MAIL] Không thể đăng nhập Gmail: {e}")
-        print(">> Chú ý: Hãy chắc chắn bạn dùng 'Mật khẩu ứng dụng' (App Password 16 chữ cái) của Gmail.")
-        return None
+        status, count_data = mail.select("INBOX")
+        if status != "OK":
+            print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MAIL] Lỗi mở INBOX.")
+            mail.logout()
+            return None
+        
+        initial_total = int(count_data[0]) if count_data and count_data[0] else 0
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MAIL] Kết nối Gmail thành công. Tổng thư hiện tại: {initial_total}. Đang quét OTP...")
 
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] [MAIL] Đã kết nối Gmail thành công. Đang chờ thư xác thực OTP từ Pokémon Center...")
-
-    last_checked_id = None
-
-    while time.time() - start_time < timeout_seconds:
-        try:
-            # Làm mới hòm thư
-            mail.noop()
-            status, messages = mail.search(None, 'ALL')
-            if status != "OK":
-                time.sleep(poll_interval)
-                continue
-
-            mail_ids = messages[0].split()
-            if not mail_ids:
-                time.sleep(poll_interval)
-                continue
-
-            # Lấy 5 email gần nhất
-            recent_ids = mail_ids[-5:]
-            recent_ids.reverse()
-
-            for m_id in recent_ids:
-                status, data = mail.fetch(m_id, "(RFC822)")
-                if status != "OK":
+        while time.time() - start_time < timeout_seconds:
+            try:
+                # Kiểm tra lại số lượng thư trong INBOX
+                res, count_res = mail.select("INBOX")
+                if res != "OK":
+                    time.sleep(poll_interval)
                     continue
 
-                raw_email = data[0][1]
-                msg = email.message_from_bytes(raw_email)
+                total_msgs = int(count_res[0])
+                if total_msgs == 0:
+                    time.sleep(poll_interval)
+                    continue
 
-                subject = decode_mime_words(msg.get("Subject", ""))
-                from_sender = decode_mime_words(msg.get("From", ""))
-                body = get_email_body(msg)
+                # Chỉ fetch tối đa 3 thư mới nhất (cực kỳ nhanh, < 1 giây)
+                fetch_start = max(1, total_msgs - 2)
+                seq_range = f"{fetch_start}:{total_msgs}"
+                status, data = mail.fetch(seq_range, "(RFC822)")
+                if status != "OK" or not data:
+                    time.sleep(poll_interval)
+                    continue
 
-                # Kiểm tra xem có phải thư từ Pokemon Center không
-                is_pokemon = (
-                    "pokemoncenter" in from_sender.lower() or 
-                    "pokemon" in subject.lower() or 
-                    "認証コード" in subject or 
-                    "パスコード" in subject or 
-                    "認証コード" in body or
-                    "パスコード" in body or
-                    "pokemoncenter-online" in body.lower()
-                )
+                now_utc = datetime.datetime.now(datetime.timezone.utc)
 
-                if is_pokemon:
-                    # Tìm mã OTP 6 chữ số trong tiêu đề hoặc nội dung
-                    # Thông thường có dạng: 認証コード: 123456 hoặc パスコード: 123456 hoặc 【123456】
-                    patterns = [
-                        r"認証コード[：:\s]*([0-9]{6})",
-                        r"パスコード[：:\s]*([0-9]{6})",
-                        r"【([0-9]{6})】",
-                        r"\b([0-9]{6})\b"
-                    ]
+                # Duyệt từ thư mới nhất trở về trước
+                for item in reversed(data):
+                    if not isinstance(item, tuple) or len(item) < 2:
+                        continue
 
+                    raw_email = item[1]
+                    msg = email.message_from_bytes(raw_email)
+
+                    subject = decode_mime_words(msg.get("Subject", ""))
+                    from_sender = decode_mime_words(msg.get("From", ""))
+                    date_str = msg.get("Date", "")
+
+                    # Tính tuổi của email (giây)
+                    email_age_seconds = None
+                    try:
+                        email_dt = email.utils.parsedate_to_datetime(date_str)
+                        if email_dt.tzinfo is None:
+                            email_dt = email_dt.replace(tzinfo=datetime.timezone.utc)
+                        email_age_seconds = (now_utc - email_dt).total_seconds()
+                    except Exception:
+                        pass
+
+                    # Nhận diện email từ Pokémon Center Online
+                    is_pokemon = (
+                        "pokemoncenter" in from_sender.lower() or
+                        "pokemon" in subject.lower() or
+                        "パスコード" in subject or
+                        "認証コード" in subject
+                    )
+
+                    if not is_pokemon:
+                        continue
+
+                    body = get_email_body(msg)
                     full_text = f"{subject}\n{body}"
-                    for pat in patterns:
-                        match = re.search(pat, full_text)
-                        if match:
-                            otp_code = match.group(1)
-                            elapsed = int(time.time() - start_time)
-                            print(f"[{datetime.now().strftime('%H:%M:%S')}] [MAIL] -> TÌM THẤY MÃ OTP: {otp_code} (Sau {elapsed}s)!")
-                            mail.logout()
-                            return otp_code
+                    code = extract_otp_code(full_text)
 
-            time.sleep(poll_interval)
+                    if not code:
+                        continue
 
-        except Exception as e:
-            # Gặp lỗi tạm thời thì thử lại
-            time.sleep(poll_interval)
+                    # Nếu mã này đã từng được sử dụng trước đó, bỏ qua để chờ thư mới hơn
+                    if code in ignore_otps:
+                        continue
 
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] [MAIL] Quá thời gian ({timeout_seconds}s) không tìm thấy thư OTP mới.")
-    try:
-        mail.logout()
-    except Exception:
-        pass
+                    # Nếu email quá cũ (> 5 phút / 300 giây) thì không dùng vì Pokémon Center chỉ cho hạn 5 phút
+                    if email_age_seconds is not None and email_age_seconds > 300:
+                        continue
+
+                    elapsed = round(time.time() - start_time, 1)
+                    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MAIL] -> TÌM THẤY MÃ OTP HỢP LỆ: [{code}] (Tìm trong {elapsed}s, Thư gửi cách đây {int(email_age_seconds or 0)}s)!")
+                    try:
+                        mail.logout()
+                    except Exception:
+                        pass
+                    return code
+
+                time.sleep(poll_interval)
+
+            except Exception as loop_err:
+                print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MAIL] Cảnh báo vòng lặp: {loop_err}")
+                time.sleep(poll_interval)
+
+    finally:
+        try:
+            mail.logout()
+        except Exception:
+            pass
+
+    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [MAIL] Hết thời gian chờ ({timeout_seconds}s) không có thư OTP mới.")
     return None
 
 if __name__ == "__main__":
-    # Test thử trực tiếp
-    print("Test module đọc OTP Gmail")
-    email_test = input("Nhập địa chỉ Gmail: ").strip()
-    pass_test = input("Nhập mật khẩu ứng dụng Gmail (App Password): ").strip()
-    code = fetch_pokemon_otp_from_gmail(email_test, pass_test, timeout_seconds=30)
-    print("Kết quả mã OTP:", code)
+    if sys.platform.startswith("win"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+    print("=== Test OTP Reader ===")
+    import json
+    try:
+        acc = json.load(open("accounts.json", encoding="utf-8"))[0]
+        code = fetch_pokemon_otp_from_gmail(acc["pokemon_email"], acc["gmail_app_password"], timeout_seconds=10)
+        print("Kết quả:", code)
+    except Exception as e:
+        print("Lỗi test:", e)
