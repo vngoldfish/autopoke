@@ -698,6 +698,165 @@
         });
     }
 
+    function formatJstDate(dateStr) {
+        if (!dateStr) return "";
+        try {
+            const d = new Date(dateStr);
+            return d.toLocaleString("ja-JP", {
+                timeZone: "Asia/Tokyo",
+                month: "2-digit",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit"
+            }) + " JST";
+        } catch (e) {
+            return dateStr;
+        }
+    }
+
+    // =========================================================================
+    // QUÉT & KIỂM TRA DANH SÁCH SẢN PHẨM ĐANG CHUUSEN (XỔ SỐ)
+    // =========================================================================
+
+    async function checkActiveLotteryList() {
+        const checkBtn = document.getElementById("pk-btn-check-only");
+        if (checkBtn) checkBtn.disabled = true;
+
+        addLog("🔍 Đang kết nối kiểm tra danh sách chuusen từ Pokémon Center...", "info");
+
+        try {
+            const gigyaReady = await waitForGigya();
+            if (!gigyaReady) {
+                addLog("Chưa thể kết nối tới Gigya Auth. Hãy đợi trang tải xong.", "err");
+                if (checkBtn) checkBtn.disabled = false;
+                return;
+            }
+
+            let jwtData;
+            try {
+                jwtData = await getJwtToken();
+            } catch (err) {
+                addLog("Bạn chưa đăng nhập hoặc phiên đã hết hạn. Hãy đăng nhập trước.", "err");
+                if (checkBtn) checkBtn.disabled = false;
+                return;
+            }
+
+            const jwt = jwtData.token;
+            try {
+                const payload = JSON.parse(atob(jwt.split(".")[1]));
+                const emailSpan = document.getElementById("pk-user-email");
+                if (emailSpan && payload.email) {
+                    emailSpan.textContent = payload.email;
+                }
+            } catch (e) {}
+
+            const listUrl = (window.ajaxUrl && window.ajaxUrl.getLotteryListUrl) ?
+                window.ajaxUrl.getLotteryListUrl : "/a/ltr/api/lottery/v1/get-lottery-list";
+
+            const listRes = await fetch(listUrl, {
+                method: "GET",
+                credentials: "include",
+                headers: {
+                    "Authorization": "Bearer " + jwt,
+                    "x-requested-with": "XMLHttpRequest"
+                }
+            });
+
+            if (!listRes.ok) {
+                addLog(`Lỗi tải danh sách: HTTP ${listRes.status}`, "err");
+                if (checkBtn) checkBtn.disabled = false;
+                return;
+            }
+
+            const json = await listRes.json();
+            const items = json.data || [];
+
+            const filterMode = localStorage.getItem("pk_filter_mode") || "unverified_only";
+            const filterLabel = filterMode === "unverified_only" ? "Chỉ [本人未認証枠]" : (filterMode === "verified_only" ? "Chỉ [本人認証済み枠]" : "Tất cả các khung");
+
+            addLog(`--------------------------------------------------`, "info");
+            addLog(`🔎 KẾT QUẢ QUÉT DANH SÁCH CHUUSEN (${filterLabel}):`, "info");
+
+            const openList = [];
+            const appliedList = [];
+            const upcomingList = [];
+            let endedCount = 0;
+
+            for (const grp of items) {
+                const groupTitle = grp.lotteryTitle || grp.lotteryGroupTitle || "Không rõ tên";
+                const isUnverifiedFrame = groupTitle.includes("【本人未認証枠】") || groupTitle.includes("本人未認証枠");
+                const isVerifiedFrame = groupTitle.includes("【本人認証済み枠】") || groupTitle.includes("本人認証済み枠");
+
+                if (filterMode === "unverified_only" && !isUnverifiedFrame) continue;
+                if (filterMode === "verified_only" && !isVerifiedFrame) continue;
+
+                const grpStatus = String(grp.applicationStatus || grp.status || "");
+                const applicationItems = grp.applicationItems || grp.itemPrizeList || [];
+                const isAlreadyApplied = grpStatus === "40" || applicationItems.some(it => it.applicationSelectedFlg === "1");
+
+                const timeRange = `${formatJstDate(grp.applicationStartDatetime)} ~ ${formatJstDate(grp.applicationEndDatetime)}`;
+                const itemDetails = applicationItems.map(it => {
+                    const price = it.price ? ` (${Number(it.price).toLocaleString()}円)` : "";
+                    return `${it.itemPrizeName || ""}${price}`;
+                }).join(", ");
+
+                const info = {
+                    title: groupTitle,
+                    items: itemDetails,
+                    timeRange: timeRange
+                };
+
+                if (isAlreadyApplied) {
+                    appliedList.push(info);
+                } else if (grpStatus === "30") {
+                    openList.push(info);
+                } else if (grpStatus === "20") {
+                    upcomingList.push(info);
+                } else if (grpStatus === "50") {
+                    endedCount++;
+                }
+            }
+
+            if (openList.length > 0) {
+                addLog(`🟢 ĐANG MỞ CHUUSEN (受付中 - ${openList.length} giải có thể nộp):`, "success");
+                openList.forEach((item, idx) => {
+                    addLog(`  👉 [${idx + 1}] ${item.title}`, "success");
+                    if (item.items) addLog(`     📦 Sản phẩm: ${item.items}`, "info");
+                    if (item.timeRange) addLog(`     ⏰ Hạn chót: ${item.timeRange}`, "info");
+                });
+            } else {
+                addLog(`🟡 Hiện không có giải nào đang mở chuusen (hoặc tài khoản này đã nộp hết).`, "warn");
+            }
+
+            if (appliedList.length > 0) {
+                addLog(`🔵 TÀI KHOẢN NÀY ĐÃ NỘP TRƯỚC ĐÓ (${appliedList.length} giải):`, "info");
+                appliedList.forEach((item, idx) => {
+                    addLog(`  ✔ [${idx + 1}] ${item.title}`, "info");
+                });
+            }
+
+            if (upcomingList.length > 0) {
+                addLog(`⏳ SẮP MỞ ĐỢT CHUUSEN (受付前 - ${upcomingList.length} giải):`, "info");
+                upcomingList.forEach((item, idx) => {
+                    addLog(`  ⏱ [${idx + 1}] ${item.title} (${item.timeRange})`, "info");
+                });
+            }
+
+            const openSpan = document.getElementById("pk-open-count");
+            const appliedSpan = document.getElementById("pk-applied-count");
+            if (openSpan) openSpan.textContent = openList.length;
+            if (appliedSpan) appliedSpan.textContent = appliedList.length;
+
+            addLog(`📊 Tổng kết bộ lọc: ${openList.length} giải chờ nộp | ${appliedList.length} giải đã nộp | ${upcomingList.length} giải sắp mở | ${endedCount} giải đã hết hạn.`, "info");
+            addLog(`--------------------------------------------------`, "info");
+
+        } catch (err) {
+            addLog(`Lỗi kiểm tra danh sách chuusen: ${err.message}`, "err");
+        } finally {
+            if (checkBtn) checkBtn.disabled = false;
+        }
+    }
+
     async function runBotProcess() {
         const runBtn = document.getElementById("pk-btn-execute");
         if (runBtn) runBtn.disabled = true;
@@ -1039,7 +1198,14 @@
                         </div>
                     </div>
 
-                    <button class="pk-btn-run" id="pk-btn-execute">🚀 QUÉT & NỘP ĐƠN NGAY</button>
+                    <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
+                        <button class="pk-btn-run" id="pk-btn-check-only" style="background: linear-gradient(135deg, #1e90ff, #0984e3); box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3);">
+                            🔍 KIỂM TRA ĐANG CHUUSEN GÌ
+                        </button>
+                        <button class="pk-btn-run" id="pk-btn-execute">
+                            🚀 QUÉT & NỘP ĐƠN NGAY
+                        </button>
+                    </div>
                     <div style="margin-top: 4px;">
                         <a href="https://www.pokemoncenter-online.com/login/" style="display: block; text-align: center; font-size: 11px; color: #a4b0be; text-decoration: underline;">Đăng xuất / Chuyển tài khoản khác</a>
                     </div>
@@ -1150,6 +1316,14 @@
             filterSelect.addEventListener("change", (e) => {
                 localStorage.setItem("pk_filter_mode", e.target.value);
                 addLog(`Đã đổi bộ lọc: ${e.target.options[e.target.selectedIndex].text}`, "info");
+                checkActiveLotteryList();
+            });
+        }
+
+        const checkBtn = document.getElementById("pk-btn-check-only");
+        if (checkBtn) {
+            checkBtn.addEventListener("click", () => {
+                checkActiveLotteryList();
             });
         }
 
