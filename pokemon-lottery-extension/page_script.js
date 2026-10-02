@@ -759,6 +759,7 @@
 
             const toApplyList = [];
             let appliedCount = 0;
+            const alreadyAppliedList = [];
             let endedCount = 0;
             let notStartedCount = 0;
 
@@ -789,6 +790,7 @@
 
                 if (isAlreadyApplied) {
                     appliedCount++;
+                    alreadyAppliedList.push(groupTitle);
                     addLog(`[Đã nộp trước đó]: ${groupTitle}`, "info");
                 } else if (grpStatus === "30") {
                     // Đang mở và chưa nộp
@@ -818,6 +820,12 @@
             if (toApplyList.length === 0) {
                 if (appliedCount > 0) {
                     addLog(`Tài khoản này ĐÃ ĐĂNG KÝ XONG ${appliedCount} giải phù hợp trước đó! Không còn giải nào chưa nộp. Hoàn thành!`, "success");
+                    if (alreadyAppliedList.length > 0) {
+                        addLog(`📋 DANH SÁCH GIẢI ĐÃ NỘP TRƯỚC ĐÓ:`, "info");
+                        alreadyAppliedList.forEach((name, idx) => {
+                            addLog(`  ✔ [${idx + 1}] ${name}`, "info");
+                        });
+                    }
                 } else {
                     addLog(`Không tìm thấy sản phẩm nào đang mở nhận đơn (受付中) phù hợp với bộ lọc. Hoàn thành!`, "warn");
                 }
@@ -830,6 +838,7 @@
                 window.ajaxUrl.applyLotteryUrl : "/a/ltr/api/lottery/v1/apply-lottery";
 
             let successCount = 0;
+            const justAppliedList = [];
             for (let i = 0; i < toApplyList.length; i++) {
                 const target = toApplyList[i];
                 addLog(`[${i + 1}/${toApplyList.length}] Đang gửi đơn: ${target.title}...`, "info");
@@ -863,6 +872,7 @@
                     if (postRes && (postRes.ok || postRes.status === 200)) {
                         addLog(`-> THÀNH CÔNG: Đã đăng ký thành công cho ${target.title}!`, "success");
                         successCount++;
+                        justAppliedList.push(target.title);
                     } else {
                         let errText = "";
                         try {
@@ -877,12 +887,29 @@
                 await new Promise(r => setTimeout(r, 1500));
             }
 
-            addLog(`🎉 HOÀN THÀNH: Đã đăng ký thành công ${successCount}/${toApplyList.length} sản phẩm!`, "success");
-            addLog("Trang web sẽ tự động tải lại sau 4 giây để cập nhật trạng thái...", "info");
+            // Cập nhật số đếm trên giao diện ngay lập tức
+            const finalApplied = appliedCount + successCount;
+            const finalRemain = Math.max(0, toApplyList.length - successCount);
+            if (openSpan) openSpan.textContent = finalRemain;
+            if (appliedSpan) appliedSpan.textContent = finalApplied;
 
-            setTimeout(() => {
-                window.location.reload();
-            }, 4000);
+            addLog(`--------------------------------------------------`, "info");
+            addLog(`🎉 HOÀN THÀNH: Đã đăng ký thành công ${successCount}/${toApplyList.length} giải vừa nộp!`, "success");
+
+            if (justAppliedList.length > 0) {
+                addLog(`📋 KẾT QUẢ VỪA NỘP THÀNH CÔNG (${justAppliedList.length} giải):`, "success");
+                justAppliedList.forEach((name, idx) => {
+                    addLog(`  ✅ [${idx + 1}] ${name}`, "success");
+                });
+            }
+
+            if (alreadyAppliedList.length > 0) {
+                addLog(`ℹ️ CÁC GIẢI ĐÃ NỘP TRƯỚC ĐÓ (${alreadyAppliedList.length} giải):`, "info");
+                alreadyAppliedList.forEach((name, idx) => {
+                    addLog(`  ✔ [${idx + 1}] ${name}`, "info");
+                });
+            }
+            addLog(`✨ Đã nộp xong toàn bộ. Không tải lại trang để bạn kiểm tra kết quả!`, "success");
 
         } catch (err) {
             addLog(`Lỗi xử lý: ${err.message}`, "err");
