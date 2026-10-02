@@ -1352,106 +1352,143 @@
                     <div id="pk-bot-logs"></div>
                 ` : `
                     <!-- GIAO DIỆN TRANG XỔ SỐ APPLY.HTML -->
-                    <div class="pk-row">
-                        <span class="pk-switch-label">Tự động nộp khi mở trang:</span>
-                        <label class="pk-switch">
-                            <input type="checkbox" id="pk-auto-toggle" ${CONFIG.autoRunOnLoad ? "checked" : ""}>
-                            <span class="pk-slider"></span>
-                        </label>
-                    </div>
-
-                    <div class="pk-row" style="margin-top: 2px;">
-                        <span class="pk-switch-label">Hiển thị danh sách:</span>
-                        <select id="pk-filter-mode" style="background: #2f3542; color: #2ed573; font-weight: bold; border: 1px solid #57606f; border-radius: 6px; padding: 4px 6px; font-size: 11px; outline: none; cursor: pointer; max-width: 170px;">
-                            <option value="all" selected>Tất cả sản phẩm (Toàn bộ)</option>
-                            <option value="unverified_only">Chỉ [本人未認証枠]</option>
-                            <option value="verified_only">Chỉ [本人認証済み枠]</option>
-                        </select>
-                    </div>
-
-                    <div class="pk-status-box">
-                        <div class="pk-status-item">
-                            <span>Tài khoản:</span>
-                            <span class="pk-status-val info" id="pk-user-email">Đang kiểm tra...</span>
+                    <div class="pk-col-main">
+                        <div class="pk-row">
+                            <span class="pk-switch-label">Tự động nộp khi mở trang:</span>
+                            <label class="pk-switch">
+                                <input type="checkbox" id="pk-auto-toggle" ${CONFIG.autoRunOnLoad ? "checked" : ""}>
+                                <span class="pk-slider"></span>
+                            </label>
                         </div>
-                        <div class="pk-status-item">
-                            <span>Cần nộp đơn:</span>
-                            <span class="pk-status-val warn" id="pk-open-count">0</span>
-                        </div>
-                        <div class="pk-status-item">
-                            <span>Đã hoàn thành:</span>
-                            <span class="pk-status-val success" id="pk-applied-count">0</span>
-                        </div>
-                    </div>
 
-                    <!-- KHỐI CHỌN SẢN PHẨM CẦN NỘP -->
-                    <div id="pk-product-selection-box">
-                        <div class="pk-selection-header">
-                            <span class="pk-selection-title">📦 CHỌN SẢN PHẨM CẦN NỘP:</span>
-                            <div style="display: flex; gap: 4px;">
-                                <button type="button" id="pk-btn-select-all" class="pk-logs-btn">Chọn hết</button>
-                                <button type="button" id="pk-btn-deselect-all" class="pk-logs-btn">Bỏ chọn</button>
+                        <div class="pk-row" style="margin-top: 2px;">
+                            <span class="pk-switch-label">Hiển thị danh sách:</span>
+                            <select id="pk-filter-mode" style="background: #2f3542; color: #2ed573; font-weight: bold; border: 1px solid #57606f; border-radius: 6px; padding: 4px 6px; font-size: 11px; outline: none; cursor: pointer; max-width: 170px;">
+                                <option value="all" selected>Tất cả sản phẩm (Toàn bộ)</option>
+                                <option value="unverified_only">Chỉ [本人未認証枠]</option>
+                                <option value="verified_only">Chỉ [本人認証済み枠]</option>
+                            </select>
+                        </div>
+
+                        <div class="pk-status-box">
+                            <div class="pk-status-item">
+                                <span>Tài khoản:</span>
+                                <span class="pk-status-val info" id="pk-user-email">Đang kiểm tra...</span>
+                            </div>
+                            <div class="pk-status-item">
+                                <span>Cần nộp đơn:</span>
+                                <span class="pk-status-val warn" id="pk-open-count">0</span>
+                            </div>
+                            <div class="pk-status-item">
+                                <span>Đã hoàn thành:</span>
+                                <span class="pk-status-val success" id="pk-applied-count">0</span>
                             </div>
                         </div>
-                        <div id="pk-product-list-container">
-                            <div style="text-align: center; color: #a4b0be; padding: 12px; font-size: 11px;">
-                                ⏳ Đang quét danh sách sản phẩm...
+
+                        <!-- KHỐI CHỌN SẢN PHẨM CẦN NỘP -->
+                        <div id="pk-product-selection-box">
+                            <div class="pk-selection-header">
+                                <span class="pk-selection-title">📦 CHỌN SẢN PHẨM CẦN NỘP:</span>
+                                <div style="display: flex; gap: 4px;">
+                                    <button type="button" id="pk-btn-select-all" class="pk-logs-btn">Chọn hết</button>
+                                    <button type="button" id="pk-btn-deselect-all" class="pk-logs-btn">Bỏ chọn</button>
+                                </div>
                             </div>
+                            <div id="pk-product-list-container">
+                                <div style="text-align: center; color: #a4b0be; padding: 12px; font-size: 11px;">
+                                    ⏳ Đang quét danh sách sản phẩm...
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
+                            <button class="pk-btn-run" id="pk-btn-execute" style="background: linear-gradient(135deg, #2ed573, #10ac84);">
+                                🚀 NỘP ĐƠN CHO CÁC SẢN PHẨM ĐÃ CHỌN
+                            </button>
+                            <button class="pk-btn-run" id="pk-btn-check-only" style="background: linear-gradient(135deg, #1e90ff, #0984e3); box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3); font-size: 12px; padding: 8px;">
+                                🔍 KIỂM TRA TOÀN BỘ TRANG (CHI TIẾT)
+                            </button>
+                        </div>
+                        <div style="margin-top: 4px;">
+                            <a href="https://www.pokemoncenter-online.com/login/" style="display: block; text-align: center; font-size: 11px; color: #a4b0be; text-decoration: underline;">Đăng xuất / Chuyển tài khoản khác</a>
                         </div>
                     </div>
 
-                    <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
-                        <button class="pk-btn-run" id="pk-btn-execute" style="background: linear-gradient(135deg, #2ed573, #10ac84);">
-                            🚀 NỘP ĐƠN CHO CÁC SẢN PHẨM ĐÃ CHỌN
-                        </button>
-                        <button class="pk-btn-run" id="pk-btn-check-only" style="background: linear-gradient(135deg, #1e90ff, #0984e3); box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3); font-size: 12px; padding: 8px;">
-                            🔍 KIỂM TRA TOÀN BỘ TRANG (CHI TIẾT)
-                        </button>
-                    </div>
-                    <div style="margin-top: 4px;">
-                        <a href="https://www.pokemoncenter-online.com/login/" style="display: block; text-align: center; font-size: 11px; color: #a4b0be; text-decoration: underline;">Đăng xuất / Chuyển tài khoản khác</a>
-                    </div>
-                    <div class="pk-logs-header">
-                        <span class="pk-logs-title">📋 KẾT QUẢ & NHẬT KÝ</span>
-                        <div class="pk-logs-actions">
-                            <button type="button" class="pk-logs-btn pk-btn-clear-logs" title="Xóa màn hình kết quả">🗑️ Xóa</button>
-                            <button type="button" class="pk-logs-btn pk-btn-expand-logs" title="Phóng to / Thu nhỏ ô kết quả">⛶ Phóng to</button>
+                    <div class="pk-col-logs">
+                        <div class="pk-logs-header">
+                            <span class="pk-logs-title">📋 KẾT QUẢ & NHẬT KÝ</span>
+                            <div class="pk-logs-actions">
+                                <button type="button" class="pk-logs-btn pk-btn-clear-logs" title="Xóa màn hình kết quả">🗑️ Xóa</button>
+                                <button type="button" class="pk-logs-btn pk-btn-expand-logs" title="Phóng to toàn màn hình / Thu nhỏ">⛶ Phóng to</button>
+                            </div>
                         </div>
+                        <div id="pk-bot-logs"></div>
                     </div>
-                    <div id="pk-bot-logs"></div>
                 `}
             </div>
         `;
 
         document.body.appendChild(container);
 
-        // Nút thu nhỏ
+        // Nút thu nhỏ widget thành thanh nổi
         const toggleBtn = document.getElementById("pk-toggle-btn");
         if (toggleBtn) {
-            toggleBtn.addEventListener("click", () => {
+            toggleBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                container.classList.remove("pk-fullscreen");
                 container.classList.toggle("minimized");
-                toggleBtn.textContent = container.classList.contains("minimized") ? "+" : "−";
+                const isMin = container.classList.contains("minimized");
+                toggleBtn.textContent = isMin ? "+" : "−";
+                toggleBtn.title = isMin ? "Mở rộng giao diện" : "Thu nhỏ giao diện";
             });
         }
 
-        // Nút phóng to / thu nhỏ giao diện & ô kết quả
-        function toggleExpand() {
-            container.classList.toggle("pk-expanded");
-            const isExp = container.classList.contains("pk-expanded");
+        // Click vào thanh header khi đang thu nhỏ sẽ tự mở lại; double click để phóng to/thu nhỏ
+        const headerBar = document.getElementById("pk-bot-header");
+        if (headerBar) {
+            headerBar.addEventListener("click", () => {
+                if (container.classList.contains("minimized")) {
+                    container.classList.remove("minimized");
+                    if (toggleBtn) toggleBtn.textContent = "−";
+                }
+            });
+            headerBar.addEventListener("dblclick", () => {
+                toggleFullscreen();
+            });
+        }
+
+        // Nút phóng to toàn màn hình / thu nhỏ lại kích thước chuẩn
+        function toggleFullscreen() {
+            if (container.classList.contains("minimized")) {
+                container.classList.remove("minimized");
+                if (toggleBtn) toggleBtn.textContent = "−";
+            }
+            container.classList.toggle("pk-fullscreen");
+            const isFull = container.classList.contains("pk-fullscreen");
             const expandHeaderBtn = document.getElementById("pk-expand-btn");
-            if (expandHeaderBtn) expandHeaderBtn.textContent = isExp ? "🗗" : "⛶";
+            if (expandHeaderBtn) {
+                expandHeaderBtn.textContent = isFull ? "🗗" : "⛶";
+                expandHeaderBtn.title = isFull ? "Thu nhỏ về kích thước chuẩn" : "Phóng to toàn màn hình";
+            }
             document.querySelectorAll(".pk-btn-expand-logs").forEach(b => {
-                b.textContent = isExp ? "🗗 Thu nhỏ" : "⛶ Phóng to";
+                b.textContent = isFull ? "🗗 Thu nhỏ" : "⛶ Phóng to";
+                b.title = isFull ? "Thu nhỏ về kích thước chuẩn" : "Phóng to toàn màn hình";
             });
         }
 
         const expandBtn = document.getElementById("pk-expand-btn");
         if (expandBtn) {
-            expandBtn.addEventListener("click", toggleExpand);
+            expandBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                toggleFullscreen();
+            });
         }
 
         document.querySelectorAll(".pk-btn-expand-logs").forEach(b => {
-            b.addEventListener("click", toggleExpand);
+            b.addEventListener("click", (e) => {
+                e.stopPropagation();
+                toggleFullscreen();
+            });
         });
 
         document.querySelectorAll(".pk-btn-clear-logs").forEach(b => {
