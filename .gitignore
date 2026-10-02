@@ -2,6 +2,8 @@
 chrome_profile/
 chrome_user_data/
 profiles/
+test_profile/
+test_chrome_profile/
 
 # Screenshots
 screenshots/
