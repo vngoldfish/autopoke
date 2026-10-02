@@ -740,6 +740,7 @@
 
             const listRes = await fetch(listUrl, {
                 method: "GET",
+                credentials: "include",
                 headers: {
                     "Authorization": "Bearer " + jwt,
                     "x-requested-with": "XMLHttpRequest"
@@ -758,12 +759,14 @@
 
             const toApplyList = [];
             let appliedCount = 0;
+            let endedCount = 0;
+            let notStartedCount = 0;
 
             const filterMode = localStorage.getItem("pk_filter_mode") || "unverified_only";
             addLog(`Bộ lọc đang chọn: ${filterMode === "unverified_only" ? "Chỉ [本人未認証枠]" : (filterMode === "verified_only" ? "Chỉ [本人認証済み枠]" : "Tất cả các khung")}`, "info");
 
             for (const grp of items) {
-                const groupTitle = grp.lotteryGroupTitle || "Không rõ tên";
+                const groupTitle = grp.lotteryTitle || grp.lotteryGroupTitle || "Không rõ tên";
                 const isUnverifiedFrame = groupTitle.includes("【本人未認証枠】") || groupTitle.includes("本人未認証枠");
                 const isVerifiedFrame = groupTitle.includes("【本人認証済み枠】") || groupTitle.includes("本人認証済み枠");
 
@@ -773,21 +776,37 @@
                     continue;
                 }
 
-                const prizes = grp.itemPrizeList || [];
-                for (const p of prizes) {
-                    const status = p.status;
-                    const prizeName = p.itemPrizeName || "";
-                    const fullTitle = `${groupTitle} - ${prizeName}`;
+                // Trạng thái theo API Pokémon Center:
+                // "20": 受付前 (chưa mở)
+                // "30": 受付中 (đang mở đăng ký)
+                // "40": 受付完了 (đã nộp đơn thành công trước đó)
+                // "50": 受付終了 (đã hết hạn)
+                const grpStatus = String(grp.applicationStatus || grp.status || "");
+                const applicationItems = grp.applicationItems || grp.itemPrizeList || [];
 
-                    if (status === 30) {
+                // Kiểm tra xem nhóm sản phẩm này đã được nộp chưa
+                const isAlreadyApplied = grpStatus === "40" || applicationItems.some(it => it.applicationSelectedFlg === "1");
+
+                if (isAlreadyApplied) {
+                    appliedCount++;
+                    addLog(`[Đã nộp trước đó]: ${groupTitle}`, "info");
+                } else if (grpStatus === "30") {
+                    // Đang mở và chưa nộp
+                    for (const item of applicationItems) {
+                        const prizeId = item.itemPrizeId || item.prizeId;
+                        const prizeName = item.itemPrizeName || "";
+                        const fullTitle = `${groupTitle}${prizeName ? ' - ' + prizeName : ''}`;
                         toApplyList.push({
                             groupId: grp.lotteryGroupId,
-                            prizeId: p.itemPrizeId,
+                            prizeId: prizeId,
                             title: fullTitle
                         });
-                    } else if (status === 40) {
-                        appliedCount++;
+                        addLog(`[Sẵn sàng nộp]: ${fullTitle}`, "info");
                     }
+                } else if (grpStatus === "20") {
+                    notStartedCount++;
+                } else if (grpStatus === "50") {
+                    endedCount++;
                 }
             }
 
@@ -797,7 +816,11 @@
             if (appliedSpan) appliedSpan.textContent = appliedCount;
 
             if (toApplyList.length === 0) {
-                addLog(`Tất cả sản phẩm phù hợp đã được nộp hoặc chưa mở. Hoàn thành!`, "success");
+                if (appliedCount > 0) {
+                    addLog(`Tài khoản này ĐÃ ĐĂNG KÝ XONG ${appliedCount} giải phù hợp trước đó! Không còn giải nào chưa nộp. Hoàn thành!`, "success");
+                } else {
+                    addLog(`Không tìm thấy sản phẩm nào đang mở nhận đơn (受付中) phù hợp với bộ lọc. Hoàn thành!`, "warn");
+                }
                 if (runBtn) runBtn.disabled = false;
                 return;
             }
@@ -812,28 +835,43 @@
                 addLog(`[${i + 1}/${toApplyList.length}] Đang gửi đơn: ${target.title}...`, "info");
 
                 try {
-                    const postRes = await fetch(applyUrl, {
-                        method: "POST",
-                        headers: {
-                            "Authorization": "Bearer " + jwt,
-                            "Content-Type": "application/json;charset=UTF-8",
-                            "x-requested-with": "XMLHttpRequest"
-                        },
-                        body: JSON.stringify({
+                    let postRes;
+                    if (typeof window.apiRequest === "function") {
+                        postRes = await window.apiRequest(applyUrl, 'POST', {
                             lotteryGroupId: target.groupId,
                             itemPrizeId: target.prizeId
-                        })
-                    });
+                        }, 'json', {
+                            "Authorization": "Bearer " + jwt,
+                            "content-type": "application/json;charset=UTF-8"
+                        });
+                    } else {
+                        postRes = await fetch(applyUrl, {
+                            method: "POST",
+                            credentials: "include",
+                            headers: {
+                                "Authorization": "Bearer " + jwt,
+                                "Content-Type": "application/json;charset=UTF-8",
+                                "x-requested-with": "XMLHttpRequest"
+                            },
+                            body: JSON.stringify({
+                                lotteryGroupId: target.groupId,
+                                itemPrizeId: target.prizeId
+                            })
+                        });
+                    }
 
-                    if (postRes.ok) {
+                    if (postRes && (postRes.ok || postRes.status === 200)) {
                         addLog(`-> THÀNH CÔNG: Đã đăng ký thành công cho ${target.title}!`, "success");
                         successCount++;
                     } else {
-                        const errText = await postRes.text();
-                        addLog(`-> THẤT BẠI (Mã lỗi ${postRes.status}): ${errText}`, "err");
+                        let errText = "";
+                        try {
+                            if (postRes.text) errText = await postRes.text();
+                        } catch (e) {}
+                        addLog(`-> THẤT BẠI (Mã lỗi ${postRes ? postRes.status : 'unknown'}): ${errText}`, "err");
                     }
                 } catch (applyErr) {
-                    addLog(`-> Lỗi kết nối khi đăng ký: ${applyErr.message}`, "err");
+                    addLog(`-> Lỗi kết nối khi đăng ký: ${applyErr.message || applyErr}`, "err");
                 }
 
                 await new Promise(r => setTimeout(r, 1500));
