@@ -1,0 +1,17 @@
+# Chrome user data and cache
+chrome_profile/
+chrome_user_data/
+
+# Screenshots
+screenshots/
+*.png
+!pokemon-lottery-extension/icon.png
+
+# Sensitive HAR and logs
+*.har
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/

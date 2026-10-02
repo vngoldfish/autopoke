@@ -1,0 +1,210 @@
+/* Floating widget container */
+#pk-auto-bot-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    width: 360px;
+    max-width: 90vw;
+    background: #1e1e24;
+    color: #f1f2f6;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4), 0 0 0 2px #ff4757;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans JP", sans-serif;
+    font-size: 13px;
+    z-index: 9999999;
+    overflow: hidden;
+    transition: all 0.3s ease;
+}
+
+#pk-auto-bot-container * {
+    box-sizing: border-box;
+}
+
+#pk-auto-bot-container.minimized #pk-bot-body {
+    display: none;
+}
+
+#pk-bot-header {
+    background: linear-gradient(135deg, #ff4757, #ee1515);
+    color: #fff;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+}
+
+#pk-bot-header .pk-title {
+    font-weight: 700;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#pk-bot-header .pk-controls {
+    display: flex;
+    gap: 6px;
+}
+
+#pk-bot-header .pk-btn-icon {
+    background: rgba(255, 255, 255, 0.2);
+    border: none;
+    color: #fff;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+#pk-bot-header .pk-btn-icon:hover {
+    background: rgba(255, 255, 255, 0.4);
+}
+
+#pk-bot-body {
+    padding: 14px;
+    max-height: 480px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.pk-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 0;
+}
+
+.pk-switch-label {
+    font-weight: 600;
+    color: #ced6e0;
+}
+
+/* Switch */
+.pk-switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+}
+
+.pk-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.pk-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #57606f;
+    transition: 0.3s;
+    border-radius: 24px;
+}
+
+.pk-slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.3s;
+    border-radius: 50%;
+}
+
+input:checked + .pk-slider {
+    background-color: #2ed573;
+}
+
+input:checked + .pk-slider:before {
+    transform: translateX(20px);
+}
+
+/* Action button */
+.pk-btn-run {
+    width: 100%;
+    padding: 10px;
+    background: linear-gradient(135deg, #2ed573, #10ac84);
+    border: none;
+    border-radius: 8px;
+    color: #fff;
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(46, 213, 115, 0.3);
+    transition: all 0.2s ease;
+}
+
+.pk-btn-run:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(46, 213, 115, 0.4);
+}
+
+.pk-btn-run:disabled {
+    background: #57606f;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+/* Status badge */
+.pk-status-box {
+    background: #2f3542;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 12px;
+}
+
+.pk-status-item {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+
+.pk-status-item:last-child {
+    margin-bottom: 0;
+}
+
+.pk-status-val {
+    font-weight: bold;
+}
+
+.pk-status-val.success { color: #2ed573; }
+.pk-status-val.warn { color: #ffa502; }
+.pk-status-val.info { color: #70a1ff; }
+
+/* Log Console */
+#pk-bot-logs {
+    background: #0f0f14;
+    border: 1px solid #2f3542;
+    border-radius: 8px;
+    padding: 8px 10px;
+    height: 150px;
+    overflow-y: auto;
+    font-family: Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.pk-log-line {
+    margin-bottom: 3px;
+    word-break: break-all;
+}
+
+.pk-log-time { color: #747d8c; }
+.pk-log-info { color: #f1f2f6; }
+.pk-log-success { color: #2ed573; font-weight: bold; }
+.pk-log-warn { color: #eccc68; }
+.pk-log-err { color: #ff4757; font-weight: bold; }
