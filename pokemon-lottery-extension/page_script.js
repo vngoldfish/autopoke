@@ -177,104 +177,127 @@
                 runBotProcess();
             });
         }
+
+        // Gắn hook vào nút gửi lại mã OTP của trang web (nếu có)
+        hookResendButton();
+    }
+
+    // Hàm tìm chính xác ô nhập Passcode trên trang Pokémon Center
+    function findOtpInput() {
+        // 1. Tìm chính xác phần tử #authCode theo cấu trúc trang Factor2Auth
+        const directAuthCode = document.getElementById("authCode");
+        if (directAuthCode) return directAuthCode;
+
+        // 2. Tìm trong form #factor2AuthForm
+        const formInput = document.querySelector('#factor2AuthForm input[name="dwfrm_factor2Auth_authCode"]') ||
+                          document.querySelector('#factor2AuthForm input[type="text"]:not([readonly])');
+        if (formInput) return formInput;
+
+        // 3. Tìm theo tên
+        const byName = document.querySelector('input[name="dwfrm_factor2Auth_authCode"], input[name*="authCode"], input[name*="passcode"]');
+        if (byName) return byName;
+
+        // 4. Tìm các input text thông thường (TUYỆT ĐỐI LOẠI TRỪ ô tìm kiếm search-field và widget bot)
+        const candidateInputs = Array.from(document.querySelectorAll('input')).filter(input => {
+            if (input.closest('#pk-auto-bot-container')) return false;
+            if (input.closest('form[role="search"]') || input.name === 'q' || input.classList.contains('search-field')) return false;
+            const type = (input.type || 'text').toLowerCase();
+            return !['hidden', 'submit', 'button', 'checkbox', 'radio'].includes(type);
+        });
+
+        return candidateInputs[0] || null;
+    }
+
+    // Hàm tìm chính xác nút xác thực '認証する'
+    function findAuthButton() {
+        const directBtn = document.getElementById("authBtn");
+        if (directBtn) return directBtn;
+
+        const formBtn = document.querySelector('#factor2AuthForm a#authBtn, #factor2AuthForm a');
+        if (formBtn) return formBtn;
+
+        const candidateButtons = Array.from(document.querySelectorAll('button, input[type="submit"], a.btn, a.comBtn, a')).filter(btn => {
+            if (btn.closest('#pk-auto-bot-container')) return false;
+            const txt = (btn.textContent || btn.value || '').trim();
+            return txt.includes('認証') || txt.includes('送信') || txt.includes('次へ');
+        });
+
+        return candidateButtons[0] || null;
+    }
+
+    // Gắn hook vào nút 'パスコードを再送する' của Pokémon Center
+    function hookResendButton() {
+        const resendBtn = document.getElementById("resendBtn");
+        if (resendBtn && !resendBtn.__pkHooked) {
+            resendBtn.__pkHooked = true;
+            resendBtn.addEventListener("click", () => {
+                addLog("⚡ Bạn vừa bấm 'パスコードを再送する' trên web. Bot sẽ quét lại Gmail sau 3.5 giây...", "info");
+                if (pollTimer) clearTimeout(pollTimer);
+                isFetchingOtp = false;
+                setTimeout(() => {
+                    fetchOtpFromLocalServer(0, false);
+                }, 3500);
+            });
+        }
     }
 
     // Điền và xác thực mã OTP
     function fillAndSubmitOtp(code) {
         if (!code) return;
         code = code.trim();
-        addLog(`Đang tìm ô Passcode và điền mã OTP [${code}]...`, "info");
+        addLog(`Đang tìm đúng ô Passcode và điền mã OTP [${code}]...`, "info");
 
         // Cập nhật lên ô input dự phòng của widget để người dùng nhìn thấy
         const manualInput = document.getElementById("pk-manual-otp");
         if (manualInput) manualInput.value = code;
 
-        // Tìm tất cả các ô input trên trang LOẠI TRỪ container của Bot
-        const candidateInputs = Array.from(document.querySelectorAll('input')).filter(input => {
-            if (input.closest('#pk-auto-bot-container')) return false;
-            const type = (input.type || 'text').toLowerCase();
-            return !['hidden', 'submit', 'button', 'checkbox', 'radio'].includes(type);
-        });
-
-        if (candidateInputs.length === 0) {
-            addLog("Không tìm thấy ô nhập Passcode trên trang web!", "err");
+        const targetInput = findOtpInput();
+        if (!targetInput) {
+            addLog("Không tìm thấy ô nhập Passcode (#authCode) trên trang web!", "err");
             return;
         }
 
-        // Trường hợp 1: Có 6 ô nhập 1 chữ số (digit-by-digit)
-        const digitInputs = candidateInputs.filter(i => i.maxLength === 1 || i.size === 1);
-        if (digitInputs.length === 6 && code.length === 6) {
-            addLog("Phát hiện 6 ô nhập từng chữ số OTP...", "info");
-            for (let idx = 0; idx < 6; idx++) {
-                const inp = digitInputs[idx];
-                const char = code[idx];
-                inp.focus();
-                try {
-                    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                    setter.call(inp, char);
-                } catch(e) {
-                    inp.value = char;
-                }
-                inp.dispatchEvent(new Event('input', { bubbles: true }));
-                inp.dispatchEvent(new Event('change', { bubbles: true }));
-                inp.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: char }));
-            }
-        } else {
-            // Trường hợp 2: Ô nhập chuỗi 6 ký tự
-            let targetInput = candidateInputs.find(i => 
-                (i.name && i.name.toLowerCase().includes("passcode")) ||
-                (i.id && i.id.toLowerCase().includes("passcode")) ||
-                (i.placeholder && i.placeholder.includes("パスコード")) ||
-                (i.name && i.name.toLowerCase().includes("code"))
-            ) || candidateInputs[0];
+        addLog(`Đã xác định đúng ô Passcode: <${targetInput.tagName.toLowerCase()} id="${targetInput.id || ''}" name="${targetInput.name || ''}">`, "info");
 
-            addLog(`Đã xác định ô nhập Passcode: <${targetInput.tagName.toLowerCase()} name="${targetInput.name || ''}" id="${targetInput.id || ''}">`, "info");
+        targetInput.focus();
 
-            targetInput.focus();
+        // Sử dụng setter native và gán giá trị
+        try {
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+            nativeInputValueSetter.call(targetInput, code);
+        } catch (e) {
+            targetInput.value = code;
+        }
+        targetInput.value = code;
+
+        // Kích hoạt toàn bộ sự kiện để trang web và factor2Auth.js nhận diện
+        targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+        targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+        targetInput.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: code[code.length - 1] }));
+
+        if (window.$) {
             try {
-                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                nativeInputValueSetter.call(targetInput, code);
-            } catch (e) {
-                targetInput.value = code;
-            }
-
-            // Kích hoạt toàn bộ sự kiện giả lập gõ phím
-            targetInput.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
-            targetInput.dispatchEvent(new Event('input', { bubbles: true }));
-            targetInput.dispatchEvent(new Event('change', { bubbles: true }));
-            targetInput.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
-
-            if (window.$) {
-                try {
-                    window.$(targetInput).val(code).trigger('input').trigger('change');
-                } catch (e) {}
-            }
+                window.$(targetInput).val(code).trigger('input').trigger('change');
+            } catch (e) {}
         }
 
-        addLog("Đã điền mã OTP thành công. Đang chờ hệ thống kiểm tra và bấm nút...", "success");
+        addLog("Đã điền mã OTP vào #authCode thành công! Đang bấm nút '認証する'...", "success");
 
-        // Chờ 1 giây để form validation cập nhật
+        // Chờ 800ms để form validation cập nhật
         setTimeout(() => {
-            const candidateButtons = Array.from(document.querySelectorAll('button, input[type="submit"], a.btn, a.comBtn, a')).filter(btn => {
-                if (btn.closest('#pk-auto-bot-container')) return false;
-                const txt = (btn.textContent || btn.value || '').trim();
-                return txt.includes('認証') || txt.includes('送信') || txt.includes('次へ') || 
-                       btn.id === 'authBtn' || btn.id === 'verifyBtn';
-            });
-
-            if (candidateButtons.length > 0) {
-                const targetBtn = candidateButtons[0];
-                addLog(`Đang bấm nút xác thực: "${(targetBtn.textContent || targetBtn.value || '').trim()}"...`, "info");
-                targetBtn.focus();
-                targetBtn.click();
+            const authBtn = findAuthButton();
+            if (authBtn) {
+                addLog(`Đang bấm nút xác thực: "${(authBtn.textContent || '').trim()}"...`, "info");
+                authBtn.focus();
+                authBtn.click();
                 if (window.$) {
-                    try { window.$(targetBtn).trigger('click'); } catch (e) {}
+                    try { window.$(authBtn).trigger('click'); } catch (e) {}
                 }
-                addLog("Đã gửi xác thực! Đang chờ chuyển hướng...", "success");
+                addLog("Đã gửi yêu cầu xác thực! Đang chờ chuyển hướng vào trang bốc thăm...", "success");
             } else {
-                addLog("Đã điền xong OTP! Vui lòng bấm nút '認証' trên màn hình nếu bot chưa tự click.", "warn");
+                addLog("Đã điền xong OTP! Vui lòng bấm nút '認証する' trên trang.", "warn");
             }
-        }, 1000);
+        }, 800);
     }
 
     // Kết nối tới OTP Server cục bộ (127.0.0.1:8765) để lấy mã từ Gmail
@@ -282,9 +305,12 @@
     let pollTimer = null;
 
     async function fetchOtpFromLocalServer(retryCount = 0, force = false) {
-        if (isFetchingOtp && retryCount === 0) {
-            addLog("Đang trong quá trình quét Gmail, vui lòng đợi...", "warn");
-            return;
+        // Nếu người dùng bấm chủ động (retryCount = 0), luôn hủy lượt quét cũ để chạy ngay lập tức
+        if (retryCount === 0) {
+            if (pollTimer) clearTimeout(pollTimer);
+            isFetchingOtp = false;
+        } else if (isFetchingOtp && retryCount > 0) {
+            // Đang chạy bước tiếp theo của loop
         }
 
         const btnFetchOtp = document.getElementById("pk-btn-fetch-otp");
@@ -347,7 +373,7 @@
                 return;
             }
 
-            addLog(`Phản hồi không xác định: ${JSON.stringify(data)}`, "warn");
+            addLog(`Phản hồi: ${JSON.stringify(data)}`, "warn");
             isFetchingOtp = false;
             if (btnFetchOtp) {
                 btnFetchOtp.disabled = false;
@@ -587,8 +613,9 @@
             }
         } else if (path.includes("mfa") || path.includes("passcode")) {
             addLog("Đang ở trang xác thực OTP. Đang thử kết nối Gmail lấy mã sau 3 giây...", "info");
+            hookResendButton();
             setTimeout(() => {
-                fetchOtpFromLocalServer();
+                fetchOtpFromLocalServer(0, false);
             }, 3000);
         }
     }
