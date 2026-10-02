@@ -54,6 +54,9 @@
                     <button class="pk-btn-run" id="pk-btn-fetch-otp" style="background: linear-gradient(135deg, #ff4757, #ee1515);">
                         📩 ĐỌC OTP GMAIL & TỰ ĐIỀN
                     </button>
+                    <div style="display: flex; justify-content: flex-end; margin-top: 3px; margin-bottom: 3px;">
+                        <a href="javascript:void(0)" id="pk-btn-force-otp" style="color: #ffa502; font-size: 11px; text-decoration: underline; cursor: pointer;">Lấy mã gần nhất ngay (Bỏ qua kiểm tra)</a>
+                    </div>
                     <div style="display: flex; gap: 6px; margin-top: 4px;">
                         <input type="text" id="pk-manual-otp" placeholder="Hoặc dán 6 số OTP vào đây" style="flex: 1; padding: 6px 8px; border-radius: 6px; border: 1px solid #57606f; background: #2f3542; color: #fff; font-size: 12px; outline: none;">
                         <button id="pk-btn-fill-otp" style="padding: 6px 12px; background: #2ed573; border: none; border-radius: 6px; color: #fff; font-weight: bold; cursor: pointer; font-size: 12px;">Điền</button>
@@ -119,7 +122,14 @@
         const btnFetchOtp = document.getElementById("pk-btn-fetch-otp");
         if (btnFetchOtp) {
             btnFetchOtp.addEventListener("click", () => {
-                fetchOtpFromLocalServer();
+                fetchOtpFromLocalServer(0, false);
+            });
+        }
+        const btnForceOtp = document.getElementById("pk-btn-force-otp");
+        if (btnForceOtp) {
+            btnForceOtp.addEventListener("click", () => {
+                addLog("Đang ép đọc mã mới nhất bất kể lượt trước...", "info");
+                fetchOtpFromLocalServer(0, true);
             });
         }
         const btnFillManual = document.getElementById("pk-btn-fill-otp");
@@ -269,8 +279,10 @@
 
     // Kết nối tới OTP Server cục bộ (127.0.0.1:8765) để lấy mã từ Gmail
     let isFetchingOtp = false;
-    async function fetchOtpFromLocalServer() {
-        if (isFetchingOtp) {
+    let pollTimer = null;
+
+    async function fetchOtpFromLocalServer(retryCount = 0, force = false) {
+        if (isFetchingOtp && retryCount === 0) {
             addLog("Đang trong quá trình quét Gmail, vui lòng đợi...", "warn");
             return;
         }
@@ -279,12 +291,14 @@
         isFetchingOtp = true;
         if (btnFetchOtp) {
             btnFetchOtp.disabled = true;
-            btnFetchOtp.textContent = "⏳ ĐANG QUÉT GMAIL CHỜ MÃ...";
+            btnFetchOtp.textContent = force ? "⏳ ĐANG LẤY MÃ GẦN NHẤT..." : `⏳ ĐANG QUÉT GMAIL... (${retryCount + 1}/25)`;
         }
 
-        addLog("Đang kết nối tới OTP Server (127.0.0.1:8765) để đọc Gmail...", "info");
+        const lastOtp = force ? "" : (localStorage.getItem("pk_last_used_otp") || "");
+
         try {
-            const res = await fetch("http://127.0.0.1:8765/get-otp");
+            const url = `http://127.0.0.1:8765/get-otp?exclude_otp=${encodeURIComponent(lastOtp)}${force ? "&force=1" : ""}`;
+            const res = await fetch(url);
             if (!res.ok) {
                 let errText = res.statusText;
                 try {
@@ -292,18 +306,56 @@
                     errText = errJson.error || errText;
                 } catch(e) {}
                 addLog(`Lỗi từ OTP Server: ${errText}`, "err");
+                isFetchingOtp = false;
+                if (btnFetchOtp) {
+                    btnFetchOtp.disabled = false;
+                    btnFetchOtp.textContent = "📩 ĐỌC OTP GMAIL & TỰ ĐIỀN";
+                }
                 return;
             }
+
             const data = await res.json();
+
             if (data.success && data.otp) {
-                addLog(`-> TÌM THẤY MÃ OTP: ${data.otp}!`, "success");
+                addLog(`-> TÌM THẤY MÃ OTP MỚI: [${data.otp}] (Thư gửi cách đây ${data.age || 0}s)!`, "success");
+                // Lưu lại mã này để lần đăng nhập sau không bị lấy trùng
+                localStorage.setItem("pk_last_used_otp", data.otp);
+                isFetchingOtp = false;
+                if (btnFetchOtp) {
+                    btnFetchOtp.disabled = false;
+                    btnFetchOtp.textContent = "📩 ĐỌC OTP GMAIL & TỰ ĐIỀN";
+                }
                 fillAndSubmitOtp(data.otp);
-            } else {
-                addLog(`Chưa nhận được OTP: ${data.error || 'Hãy thử lại sau ít giây'}`, "warn");
+                return;
             }
+
+            if (data.waiting) {
+                if (retryCount < 25) {
+                    addLog(`[Chờ Gmail] ${data.error} (Lần ${retryCount + 1}/25, thử lại sau 2.5s)...`, "info");
+                    clearTimeout(pollTimer);
+                    pollTimer = setTimeout(() => {
+                        fetchOtpFromLocalServer(retryCount + 1, force);
+                    }, 2500);
+                } else {
+                    addLog("Quá 60 giây chưa có thư mới. Hãy bấm 'パスコードを再送する' trên web hoặc bấm 'Lấy mã gần nhất ngay'!", "warn");
+                    isFetchingOtp = false;
+                    if (btnFetchOtp) {
+                        btnFetchOtp.disabled = false;
+                        btnFetchOtp.textContent = "📩 ĐỌC OTP GMAIL & TỰ ĐIỀN";
+                    }
+                }
+                return;
+            }
+
+            addLog(`Phản hồi không xác định: ${JSON.stringify(data)}`, "warn");
+            isFetchingOtp = false;
+            if (btnFetchOtp) {
+                btnFetchOtp.disabled = false;
+                btnFetchOtp.textContent = "📩 ĐỌC OTP GMAIL & TỰ ĐIỀN";
+            }
+
         } catch(e) {
             addLog("Không thể kết nối tới OTP Server! Hãy chắc chắn file 'chay_otp_server.bat' đang mở.", "err");
-        } finally {
             isFetchingOtp = false;
             if (btnFetchOtp) {
                 btnFetchOtp.disabled = false;

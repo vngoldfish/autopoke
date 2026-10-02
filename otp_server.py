@@ -1,10 +1,10 @@
 """
 =============================================================================
-  OTP LOCAL SERVER (MULTI-THREADED) - HỖ TRỢ CHROME EXTENSION ĐỌC GMAIL OTP
+  OTP LOCAL SERVER (FAST & STATELESS) - PHỤC VỤ CHROME EXTENSION ĐỌC GMAIL OTP
 =============================================================================
 Máy chủ HTTP cục bộ chạy tại http://127.0.0.1:8765.
 Tự động kết nối Gmail, quét thư xác thực mới nhất từ Pokémon Center và gửi về
-cho Chrome Extension để tự điền mã Passcode.
+cho Chrome Extension trong ~1.2 giây mỗi lượt, hỗ trợ đăng nhập liên tục nhiều nick.
 """
 
 import http.server
@@ -13,7 +13,7 @@ import json
 import urllib.parse
 import sys
 from pathlib import Path
-from otp_reader import fetch_pokemon_otp_from_gmail
+from otp_reader import get_latest_pokemon_otp
 
 # Cấu hình UTF-8 cho Windows Terminal
 if sys.platform.startswith("win"):
@@ -26,9 +26,6 @@ if sys.platform.startswith("win"):
 PORT = 8765
 BASE_DIR = Path(__file__).resolve().parent
 ACCOUNTS_FILE = BASE_DIR / "accounts.json"
-
-# Bộ nhớ lưu các mã OTP đã dùng để tránh đọc trùng mã cũ
-USED_OTPS = set()
 
 def get_app_password_for_email(email_addr):
     """Tìm mật khẩu ứng dụng Gmail từ file accounts.json."""
@@ -62,7 +59,6 @@ class OTPHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        global USED_OTPS
         parsed = urllib.parse.urlparse(self.path)
 
         if parsed.path == "/ping":
@@ -70,31 +66,16 @@ class OTPHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_cors_headers()
             self.end_headers()
-            resp = {
-                "status": "OK",
-                "message": "OTP Server đang hoạt động tốt!",
-                "used_otps": list(USED_OTPS)
-            }
+            resp = {"status": "OK", "message": "OTP Server đang hoạt động tốt!"}
             self.wfile.write(json.dumps(resp, ensure_ascii=False).encode("utf-8"))
-            return
-
-        if parsed.path == "/clear-cache":
-            USED_OTPS.clear()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_cors_headers()
-            self.end_headers()
-            self.wfile.write(json.dumps({"success": True, "message": "Đã làm trống danh sách OTP cũ!"}).encode("utf-8"))
             return
 
         if parsed.path == "/get-otp":
             query = urllib.parse.parse_qs(parsed.query)
             email_addr = query.get("email", [""])[0].strip()
             app_pwd = query.get("app_password", [""])[0].strip()
+            exclude_otp = query.get("exclude_otp", [""])[0].strip()
             force = query.get("force", ["0"])[0] == "1"
-
-            if force:
-                USED_OTPS.clear()
 
             if not app_pwd and email_addr:
                 app_pwd = get_app_password_for_email(email_addr)
@@ -122,15 +103,11 @@ class OTPHandler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(resp, ensure_ascii=False).encode("utf-8"))
                 return
 
-            print(f"\n[YÊU CẦU OTP] Chrome Extension đang yêu cầu đọc OTP cho: {email_addr}")
-            print(f"               (Đã bỏ qua các mã cũ: {list(USED_OTPS)})")
-
-            otp_code = fetch_pokemon_otp_from_gmail(
+            res = get_latest_pokemon_otp(
                 gmail_address=email_addr,
                 app_password=app_pwd,
-                timeout_seconds=65,
-                poll_interval=2,
-                ignore_otps=USED_OTPS
+                exclude_otp=exclude_otp if not force else None,
+                force=force
             )
 
             self.send_response(200)
@@ -138,14 +115,20 @@ class OTPHandler(http.server.BaseHTTPRequestHandler):
             self.send_cors_headers()
             self.end_headers()
 
-            if otp_code:
-                USED_OTPS.add(otp_code)
-                print(f"[THÀNH CÔNG] Đã gửi mã OTP [{otp_code}] về cho Chrome Extension!")
-                resp = {"success": True, "otp": otp_code}
+            if res.get("status") == "ok":
+                otp_code = res.get("otp")
+                age = res.get("age", 0)
+                print(f"[THÀNH CÔNG] Đã tìm thấy OTP mới [{otp_code}] (gửi cách đây {age}s) cho {email_addr}!")
+                resp = {"success": True, "otp": otp_code, "age": age}
             else:
+                status = res.get("status")
+                err_msg = res.get("error", "Chưa có thư mới")
+                print(f"[ĐANG CHỜ] {err_msg}")
                 resp = {
                     "success": False,
-                    "error": "Chưa thấy thư OTP mới từ Pokémon Center trong Gmail (quá 60s). Hãy bấm 'パスコードを再送する' trên web rồi bấm lại!"
+                    "waiting": True,
+                    "status": status,
+                    "error": err_msg
                 }
 
             self.wfile.write(json.dumps(resp, ensure_ascii=False).encode("utf-8"))
@@ -160,7 +143,7 @@ class OTPHandler(http.server.BaseHTTPRequestHandler):
 
 def main():
     print("=" * 72)
-    print(f"  OTP HELPER SERVER (MULTI-THREADED) ĐANG CHẠY TẠI http://127.0.0.1:{PORT}")
+    print(f"  OTP HELPER SERVER (FAST & STATELESS) ĐANG CHẠY TẠI http://127.0.0.1:{PORT}")
     print("  Server phục vụ Chrome Extension tự động đọc mã OTP từ Gmail.")
     print("  Giữ cửa sổ này mở trong khi sử dụng trình duyệt Chrome!")
     print("=" * 72)
