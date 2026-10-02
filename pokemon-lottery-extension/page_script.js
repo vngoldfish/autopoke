@@ -1,14 +1,23 @@
 /**
  * Pokemon Center Lottery Automation - Page Script (World: MAIN)
- * Chạy trực tiếp trong ngữ cảnh trang web, có quyền truy cập trực tiếp window.gigya, window.apiRequest
+ * Tự động hóa đăng nhập, lấy OTP từ Gmail theo từng nick, và đăng ký xổ số Pokémon Center Online Japan
  */
 
 (function () {
     console.log("[PK-BOT] Page script initialized in MAIN world.");
 
     const CONFIG = {
-        autoRunOnLoad: true,        // Tự động chạy khi vào trang apply.html
+        autoRunOnLoad: true,        // Tự động nộp đơn khi vào apply.html
+        autoLoginOnLoad: false,     // Tự động đăng nhập khi vào /login/
         monitorIntervalMin: 10,     // Chu kỳ tự động kiểm tra lại (phút)
+    };
+
+    // Quản lý trạng thái tài khoản
+    const STATE = {
+        accounts: [],
+        activeAccountId: null,
+        isFetchingOtp: false,
+        pollTimer: null
     };
 
     // Helper ghi log lên widget
@@ -25,179 +34,446 @@
         }
     }
 
-    // Tạo Floating Widget trên giao diện
-    function createWidget() {
-        if (document.getElementById("pk-auto-bot-container")) return;
+    // =========================================================================
+    // QUẢN LÝ TÀI KHOẢN (ACCOUNTS MANAGEMENT)
+    // =========================================================================
 
-        const path = window.location.pathname.toLowerCase();
-        const isMfaPage = path.includes("mfa") || path.includes("passcode");
-        const isLoginPage = (path.includes("login") || path.endsWith("/login/")) && !isMfaPage;
-
-        const container = document.createElement("div");
-        container.id = "pk-auto-bot-container";
-
-        container.innerHTML = `
-            <div id="pk-bot-header">
-                <div class="pk-title">
-                    <span>⚡ PKM Auto Lottery</span>
-                </div>
-                <div class="pk-controls">
-                    <button class="pk-btn-icon" id="pk-toggle-btn" title="Thu nhỏ/Mở rộng">−</button>
-                </div>
-            </div>
-            <div id="pk-bot-body">
-                ${isMfaPage ? `
-                    <div class="pk-status-box">
-                        <div style="color: #2ed573; font-weight: bold; margin-bottom: 6px;">📩 BƯỚC NHẬP MÃ OTP GMAIL</div>
-                        <div style="font-size: 11px; line-height: 1.4;">Pokémon Center đã gửi mã OTP về Gmail. Bấm nút bên dưới để bot tự động đọc và điền mã OTP!</div>
-                    </div>
-                    <button class="pk-btn-run" id="pk-btn-fetch-otp" style="background: linear-gradient(135deg, #ff4757, #ee1515);">
-                        📩 ĐỌC OTP GMAIL & TỰ ĐIỀN
-                    </button>
-                    <div style="display: flex; justify-content: flex-end; margin-top: 3px; margin-bottom: 3px;">
-                        <a href="javascript:void(0)" id="pk-btn-force-otp" style="color: #ffa502; font-size: 11px; text-decoration: underline; cursor: pointer;">Lấy mã gần nhất ngay (Bỏ qua kiểm tra)</a>
-                    </div>
-                    <div style="display: flex; gap: 6px; margin-top: 4px;">
-                        <input type="text" id="pk-manual-otp" placeholder="Hoặc dán 6 số OTP vào đây" style="flex: 1; padding: 6px 8px; border-radius: 6px; border: 1px solid #57606f; background: #2f3542; color: #fff; font-size: 12px; outline: none;">
-                        <button id="pk-btn-fill-otp" style="padding: 6px 12px; background: #2ed573; border: none; border-radius: 6px; color: #fff; font-weight: bold; cursor: pointer; font-size: 12px;">Điền</button>
-                    </div>
-                    <div id="pk-bot-logs"></div>
-                ` : isLoginPage ? `
-                    <div class="pk-status-box">
-                        <div style="color: #ffa502; font-weight: bold; margin-bottom: 6px;">🔑 TRANG ĐĂNG NHẬP</div>
-                        <div style="font-size: 11px; line-height: 1.4;">Vui lòng đăng nhập tài khoản. Ngay sau khi bấm đăng nhập, bot sẽ tự động đọc mã OTP từ Gmail ở bước tiếp theo!</div>
-                    </div>
-                    <div id="pk-bot-logs"></div>
-                ` : `
-                    <div class="pk-row">
-                        <span class="pk-switch-label">Tự động nộp khi mở trang:</span>
-                        <label class="pk-switch">
-                            <input type="checkbox" id="pk-auto-toggle" ${CONFIG.autoRunOnLoad ? "checked" : ""}>
-                            <span class="pk-slider"></span>
-                        </label>
-                    </div>
-
-                    <div class="pk-row" style="margin-top: 2px;">
-                        <span class="pk-switch-label">Loại khung đăng ký:</span>
-                        <select id="pk-filter-mode" style="background: #2f3542; color: #2ed573; font-weight: bold; border: 1px solid #57606f; border-radius: 6px; padding: 4px 6px; font-size: 11px; outline: none; cursor: pointer; max-width: 170px;">
-                            <option value="unverified_only" selected>Chỉ [本人未認証枠]</option>
-                            <option value="verified_only">Chỉ [本人認証済み枠]</option>
-                            <option value="all">Tất cả các khung</option>
-                        </select>
-                    </div>
-
-                    <div class="pk-status-box">
-                        <div class="pk-status-item">
-                            <span>Tài khoản:</span>
-                            <span class="pk-status-val info" id="pk-user-email">Đang kiểm tra...</span>
-                        </div>
-                        <div class="pk-status-item">
-                            <span>Cần nộp đơn:</span>
-                            <span class="pk-status-val warn" id="pk-open-count">0</span>
-                        </div>
-                        <div class="pk-status-item">
-                            <span>Đã hoàn thành:</span>
-                            <span class="pk-status-val success" id="pk-applied-count">0</span>
-                        </div>
-                    </div>
-
-                    <button class="pk-btn-run" id="pk-btn-execute">🚀 QUÉT & NỘP ĐƠN NGAY</button>
-                    <div id="pk-bot-logs"></div>
-                `}
-            </div>
-        `;
-
-        document.body.appendChild(container);
-
-        // Nút thu nhỏ
-        const toggleBtn = document.getElementById("pk-toggle-btn");
-        if (toggleBtn) {
-            toggleBtn.addEventListener("click", () => {
-                container.classList.toggle("minimized");
-                toggleBtn.textContent = container.classList.contains("minimized") ? "+" : "−";
-            });
-        }
-
-        // Xử lý trang MFA OTP
-        const btnFetchOtp = document.getElementById("pk-btn-fetch-otp");
-        if (btnFetchOtp) {
-            btnFetchOtp.addEventListener("click", () => {
-                fetchOtpFromLocalServer(0, false);
-            });
-        }
-        const btnForceOtp = document.getElementById("pk-btn-force-otp");
-        if (btnForceOtp) {
-            btnForceOtp.addEventListener("click", () => {
-                addLog("Đang ép đọc mã mới nhất bất kể lượt trước...", "info");
-                fetchOtpFromLocalServer(0, true);
-            });
-        }
-        const btnFillManual = document.getElementById("pk-btn-fill-otp");
-        if (btnFillManual) {
-            btnFillManual.addEventListener("click", () => {
-                const manualCode = document.getElementById("pk-manual-otp").value.trim();
-                if (manualCode) {
-                    fillAndSubmitOtp(manualCode);
-                } else {
-                    addLog("Vui lòng nhập mã OTP 6 số!", "warn");
+    // Tải danh sách tài khoản từ local server hoặc localStorage
+    async function loadAccounts() {
+        let loaded = [];
+        try {
+            const res = await fetch("http://127.0.0.1:8765/accounts");
+            if (res.ok) {
+                const data = await res.json();
+                if (data.success && Array.isArray(data.accounts)) {
+                    loaded = data.accounts;
+                    localStorage.setItem("pk_accounts", JSON.stringify(loaded));
                 }
-            });
-        }
-
-        // Checkbox tự động
-        const autoToggle = document.getElementById("pk-auto-toggle");
-        if (autoToggle) {
-            autoToggle.addEventListener("change", (e) => {
-                CONFIG.autoRunOnLoad = e.target.checked;
-                localStorage.setItem("pk_auto_run", e.target.checked ? "1" : "0");
-                addLog(`Đã ${e.target.checked ? "BẬT" : "TẮT"} chế độ tự động chạy khi vào trang.`, "info");
-            });
-            const savedPref = localStorage.getItem("pk_auto_run");
-            if (savedPref !== null) {
-                autoToggle.checked = savedPref === "1";
-                CONFIG.autoRunOnLoad = savedPref === "1";
+            }
+        } catch (e) {
+            // Server offline -> đọc từ localStorage
+            const localData = localStorage.getItem("pk_accounts");
+            if (localData) {
+                try { loaded = JSON.parse(localData); } catch (err) {}
             }
         }
 
-        // Dropdown chọn loại khung (Mặc định: Chỉ 本人未認証枠)
-        const filterSelect = document.getElementById("pk-filter-mode");
-        if (filterSelect) {
-            const savedFilter = localStorage.getItem("pk_filter_mode") || "unverified_only";
-            filterSelect.value = savedFilter;
-            filterSelect.addEventListener("change", (e) => {
-                localStorage.setItem("pk_filter_mode", e.target.value);
-                addLog(`Đã đổi bộ lọc: ${e.target.options[e.target.selectedIndex].text}`, "info");
-            });
+        if (loaded.length === 0) {
+            loaded = [
+                {
+                    id: "acc_1",
+                    name: "tuanapplejp@gmail",
+                    pokemon_email: "tuanapplejp@gmail.com",
+                    pokemon_password: "Hiro0052021@",
+                    otp_email: "tuanapplejp@gmail.com",
+                    gmail_app_password: "xrit ibjd ixdy bhjz",
+                    enabled: true
+                }
+            ];
+            localStorage.setItem("pk_accounts", JSON.stringify(loaded));
         }
 
-        // Nút bấm chạy thủ công
-        const runBtn = document.getElementById("pk-btn-execute");
-        if (runBtn) {
-            runBtn.addEventListener("click", () => {
-                runBotProcess();
-            });
+        STATE.accounts = loaded;
+
+        // Xác định tài khoản đang chọn
+        const savedActiveId = localStorage.getItem("pk_active_account_id");
+        if (savedActiveId && STATE.accounts.some(a => a.id === savedActiveId)) {
+            STATE.activeAccountId = savedActiveId;
+        } else {
+            STATE.activeAccountId = STATE.accounts[0].id;
+            localStorage.setItem("pk_active_account_id", STATE.activeAccountId);
         }
 
-        // Gắn hook vào nút gửi lại mã OTP của trang web (nếu có)
-        hookResendButton();
+        renderAccountDropdown();
+        updateActiveAccountUI();
     }
 
-    // Hàm tìm chính xác ô nhập Passcode trên trang Pokémon Center
+    // Lưu danh sách tài khoản lên local server và localStorage
+    async function saveAccounts(accounts) {
+        STATE.accounts = accounts;
+        localStorage.setItem("pk_accounts", JSON.stringify(accounts));
+
+        try {
+            await fetch("http://127.0.0.1:8765/accounts", {
+                method: "POST",
+                headers: { "Content-Type": "application/json; charset=utf-8" },
+                body: JSON.stringify(accounts)
+            });
+            addLog("Đã đồng bộ tài khoản vào accounts.json thành công!", "success");
+        } catch (e) {
+            addLog("Đã lưu tạm vào trình duyệt (OTP Server đang offline, chưa ghi file).", "warn");
+        }
+
+        renderAccountDropdown();
+        updateActiveAccountUI();
+    }
+
+    // Lấy tài khoản đang active
+    function getActiveAccount() {
+        return STATE.accounts.find(a => a.id === STATE.activeAccountId) || STATE.accounts[0] || null;
+    }
+
+    // Chuyển đổi tài khoản đang active
+    function setActiveAccount(accId) {
+        if (!accId || !STATE.accounts.some(a => a.id === accId)) return;
+        STATE.activeAccountId = accId;
+        localStorage.setItem("pk_active_account_id", accId);
+        renderAccountDropdown();
+        updateActiveAccountUI();
+
+        const activeAcc = getActiveAccount();
+        addLog(`Đã chuyển sang tài khoản: [${activeAcc.name || activeAcc.pokemon_email}]`, "info");
+
+        // Nếu đang ở trang đăng nhập, tự điền ngay tài khoản mới
+        const path = window.location.pathname.toLowerCase();
+        if (path.includes("login") && !path.includes("mfa")) {
+            fillLoginForm(activeAcc);
+        }
+    }
+
+    // Cập nhật dropdown chọn tài khoản trong widget
+    function renderAccountDropdown() {
+        const select = document.getElementById("pk-acc-dropdown");
+        if (!select) return;
+
+        select.innerHTML = "";
+        STATE.accounts.forEach(acc => {
+            const opt = document.createElement("option");
+            opt.value = acc.id;
+            const displayName = acc.name || acc.pokemon_email;
+            opt.textContent = `${displayName} (${acc.pokemon_email})`;
+            if (acc.id === STATE.activeAccountId) {
+                opt.selected = true;
+            }
+            select.appendChild(opt);
+        });
+
+        const newOpt = document.createElement("option");
+        newOpt.value = "__new__";
+        newOpt.textContent = "➕ Thêm tài khoản mới...";
+        select.appendChild(newOpt);
+    }
+
+    // Cập nhật các thông tin tài khoản trên giao diện Widget
+    function updateActiveAccountUI() {
+        const acc = getActiveAccount();
+        if (!acc) return;
+
+        // Trên trang Login
+        const loginName = document.getElementById("pk-login-acc-name");
+        if (loginName) loginName.textContent = acc.name || acc.pokemon_email;
+        const loginEmail = document.getElementById("pk-login-acc-email");
+        if (loginEmail) loginEmail.textContent = acc.pokemon_email || "--";
+        const loginOtpMail = document.getElementById("pk-login-acc-otp-mail");
+        if (loginOtpMail) loginOtpMail.textContent = acc.otp_email || acc.pokemon_email || "--";
+
+        // Trên trang MFA
+        const mfaName = document.getElementById("pk-mfa-acc-name");
+        if (mfaName) mfaName.textContent = acc.name || acc.pokemon_email;
+        const mfaOtpMail = document.getElementById("pk-mfa-acc-otp-mail");
+        if (mfaOtpMail) mfaOtpMail.textContent = acc.otp_email || acc.pokemon_email || "--";
+    }
+
+    // =========================================================================
+    // MODAL QUẢN LÝ TÀI KHOẢN (ACCOUNT MANAGER MODAL)
+    // =========================================================================
+
+    function openAccountModal(editingId = null) {
+        let overlay = document.getElementById("pk-acc-modal-overlay");
+        if (overlay) overlay.remove();
+
+        overlay = document.createElement("div");
+        overlay.id = "pk-acc-modal-overlay";
+
+        const editingAcc = editingId ? STATE.accounts.find(a => a.id === editingId) : null;
+
+        overlay.innerHTML = `
+            <div id="pk-acc-modal">
+                <div id="pk-acc-modal-header">
+                    <span>⚙️ QUẢN LÝ TÀI KHOẢN POKÉMON & GMAIL OTP</span>
+                    <button id="pk-modal-close-btn" style="background: none; border: none; color: #fff; font-size: 18px; cursor: pointer; font-weight: bold;">✕</button>
+                </div>
+                <div id="pk-acc-modal-body">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: bold; color: #ced6e0;">Danh sách nick đã lưu (${STATE.accounts.length}):</span>
+                        <button id="pk-modal-add-btn" style="padding: 6px 12px; background: #2ed573; border: none; border-radius: 6px; color: #fff; font-weight: bold; cursor: pointer; font-size: 12px;">➕ Thêm nick mới</button>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto;">
+                        ${STATE.accounts.map(acc => `
+                            <div class="pk-acc-card ${acc.id === STATE.activeAccountId ? 'active' : ''}">
+                                <div class="pk-acc-info">
+                                    <div class="pk-acc-name">${acc.name || acc.pokemon_email} ${acc.id === STATE.activeAccountId ? '<span style="color: #2ed573; font-size: 11px;">[Đang chọn]</span>' : ''}</div>
+                                    <div class="pk-acc-email">🔑 Pokémon: <b>${acc.pokemon_email}</b></div>
+                                    <div class="pk-acc-otp-mail">📩 Gmail nhận OTP: <b>${acc.otp_email || acc.pokemon_email}</b></div>
+                                </div>
+                                <div class="pk-acc-actions">
+                                    ${acc.id !== STATE.activeAccountId ? `<button class="pk-btn-sm pk-btn-select" data-select-id="${acc.id}">Chọn</button>` : ''}
+                                    <button class="pk-btn-sm pk-btn-edit" data-edit-id="${acc.id}">Sửa</button>
+                                    ${STATE.accounts.length > 1 ? `<button class="pk-btn-sm pk-btn-delete" data-del-id="${acc.id}">Xóa</button>` : ''}
+                                </div>
+                            </div>
+                        `).join("")}
+                    </div>
+
+                    <div style="border-top: 1px solid #3e4451; padding-top: 12px;">
+                        <div style="font-weight: bold; color: #ffa502; margin-bottom: 8px;">
+                            ${editingAcc ? `✏️ Chỉnh sửa: ${editingAcc.name || editingAcc.pokemon_email}` : `➕ Thêm tài khoản mới`}
+                        </div>
+                        <input type="hidden" id="pk-input-id" value="${editingAcc ? editingAcc.id : ''}">
+                        
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                            <div class="pk-form-group">
+                                <label class="pk-form-label">Tên gợi nhớ:</label>
+                                <input type="text" id="pk-input-name" class="pk-form-input" placeholder="VD: Nick 1" value="${editingAcc ? (editingAcc.name || '') : ''}">
+                            </div>
+                            <div class="pk-form-group">
+                                <label class="pk-form-label">Email Pokémon Center:</label>
+                                <input type="text" id="pk-input-poke-email" class="pk-form-input" placeholder="user@gmail.com" value="${editingAcc ? (editingAcc.pokemon_email || '') : ''}">
+                            </div>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                            <div class="pk-form-group">
+                                <label class="pk-form-label">Mật khẩu Pokémon Center:</label>
+                                <input type="password" id="pk-input-poke-pwd" class="pk-form-input" placeholder="Mật khẩu Pokémon" value="${editingAcc ? (editingAcc.pokemon_password || '') : ''}">
+                            </div>
+                            <div class="pk-form-group">
+                                <label class="pk-form-label">Gmail nhận OTP:</label>
+                                <input type="text" id="pk-input-otp-email" class="pk-form-input" placeholder="Bỏ trống nếu giống trên" value="${editingAcc ? (editingAcc.otp_email || '') : ''}">
+                            </div>
+                        </div>
+
+                        <div class="pk-form-group">
+                            <label class="pk-form-label">Mật khẩu ứng dụng Gmail (16 chữ cái):</label>
+                            <input type="text" id="pk-input-app-pwd" class="pk-form-input" placeholder="VD: xrit ibjd ixdy bhjz" value="${editingAcc ? (editingAcc.gmail_app_password || '') : ''}">
+                        </div>
+
+                        <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px;">
+                            ${editingAcc ? `<button id="pk-modal-cancel-edit" style="padding: 7px 14px; background: #57606f; border: none; border-radius: 6px; color: #fff; cursor: pointer; font-size: 12px;">Hủy sửa</button>` : ''}
+                            <button id="pk-modal-save-btn" style="padding: 7px 18px; background: linear-gradient(135deg, #2ed573, #10ac84); border: none; border-radius: 6px; color: #fff; font-weight: bold; cursor: pointer; font-size: 13px;">💾 Lưu tài khoản</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        // Đóng modal
+        document.getElementById("pk-modal-close-btn").addEventListener("click", () => overlay.remove());
+        overlay.addEventListener("click", (e) => {
+            if (e.target === overlay) overlay.remove();
+        });
+
+        // Bấm nút thêm mới
+        document.getElementById("pk-modal-add-btn").addEventListener("click", () => {
+            openAccountModal(null);
+        });
+
+        // Bấm hủy sửa
+        const cancelBtn = document.getElementById("pk-modal-cancel-edit");
+        if (cancelBtn) {
+            cancelBtn.addEventListener("click", () => openAccountModal(null));
+        }
+
+        // Chọn tài khoản
+        overlay.querySelectorAll("[data-select-id]").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+                const id = e.target.getAttribute("data-select-id");
+                setActiveAccount(id);
+                openAccountModal(null);
+            });
+        });
+
+        // Sửa tài khoản
+        overlay.querySelectorAll("[data-edit-id]").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+                const id = e.target.getAttribute("data-edit-id");
+                openAccountModal(id);
+            });
+        });
+
+        // Xóa tài khoản
+        overlay.querySelectorAll("[data-del-id]").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+                const id = e.target.getAttribute("data-del-id");
+                if (confirm("Bạn có chắc chắn muốn xóa tài khoản này khỏi danh sách?")) {
+                    const newAccs = STATE.accounts.filter(a => a.id !== id);
+                    if (STATE.activeAccountId === id) {
+                        STATE.activeAccountId = newAccs[0].id;
+                    }
+                    saveAccounts(newAccs);
+                    openAccountModal(null);
+                }
+            });
+        });
+
+        // Lưu tài khoản từ form
+        document.getElementById("pk-modal-save-btn").addEventListener("click", () => {
+            const accId = document.getElementById("pk-input-id").value.trim();
+            const name = document.getElementById("pk-input-name").value.trim();
+            const pokeEmail = document.getElementById("pk-input-poke-email").value.trim();
+            const pokePwd = document.getElementById("pk-input-poke-pwd").value.trim();
+            let otpEmail = document.getElementById("pk-input-otp-email").value.trim();
+            const appPwd = document.getElementById("pk-input-app-pwd").value.trim();
+
+            if (!pokeEmail) {
+                alert("Vui lòng nhập Email Pokémon Center!");
+                return;
+            }
+            if (!otpEmail) {
+                otpEmail = pokeEmail;
+            }
+
+            const newAccs = [...STATE.accounts];
+            if (accId) {
+                // Chỉnh sửa
+                const idx = newAccs.findIndex(a => a.id === accId);
+                if (idx !== -1) {
+                    newAccs[idx] = {
+                        ...newAccs[idx],
+                        name: name || pokeEmail,
+                        pokemon_email: pokeEmail,
+                        pokemon_password: pokePwd,
+                        otp_email: otpEmail,
+                        gmail_app_password: appPwd
+                    };
+                }
+            } else {
+                // Thêm mới
+                const newId = `acc_${Date.now()}`;
+                newAccs.push({
+                    id: newId,
+                    name: name || pokeEmail,
+                    pokemon_email: pokeEmail,
+                    pokemon_password: pokePwd,
+                    otp_email: otpEmail,
+                    gmail_app_password: appPwd,
+                    enabled: true
+                });
+                STATE.activeAccountId = newId;
+            }
+
+            saveAccounts(newAccs);
+            overlay.remove();
+        });
+    }
+
+    // =========================================================================
+    // TỰ ĐỘNG ĐĂNG NHẬP (LOGIN AUTOMATION)
+    // =========================================================================
+
+    function findLoginEmailInput() {
+        return document.querySelector('#loginId') ||
+               document.querySelector('input[name="loginID"]') ||
+               document.querySelector('input[name="email"]') ||
+               document.querySelector('input[type="email"]') ||
+               document.querySelector('input[placeholder*="メール"]') ||
+               Array.from(document.querySelectorAll('input[type="text"]')).find(i => {
+                   if (i.closest('#pk-auto-bot-container') || i.name === 'q') return false;
+                   const n = (i.name || i.id || '').toLowerCase();
+                   return n.includes('login') || n.includes('mail') || n.includes('user');
+               });
+    }
+
+    function findLoginPasswordInput() {
+        return document.querySelector('#password') ||
+               document.querySelector('input[name="password"]') ||
+               document.querySelector('input[type="password"]') ||
+               document.querySelector('input[placeholder*="パスワード"]');
+    }
+
+    function findLoginSubmitButton() {
+        return document.querySelector('#loginBtn') ||
+               document.querySelector('.loginBtn') ||
+               document.querySelector('button[type="submit"]') ||
+               document.querySelector('input[type="submit"]') ||
+               document.querySelector('a.comBtn01') ||
+               Array.from(document.querySelectorAll('button, input[type="submit"], a')).find(b => {
+                   if (b.closest('#pk-auto-bot-container')) return false;
+                   const txt = (b.textContent || b.value || '').trim();
+                   return txt.includes('ログイン') || txt.includes('Sign In');
+               });
+    }
+
+    function fillLoginForm(acc) {
+        if (!acc) return false;
+        const emailInput = findLoginEmailInput();
+        const pwdInput = findLoginPasswordInput();
+
+        if (!emailInput || !pwdInput) {
+            addLog("Chưa tìm thấy form đăng nhập trên màn hình.", "warn");
+            return false;
+        }
+
+        addLog(`Đang tự điền Email và Mật khẩu cho [${acc.name || acc.pokemon_email}]...`, "info");
+
+        // Điền email
+        emailInput.focus();
+        try {
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+            setter.call(emailInput, acc.pokemon_email || "");
+        } catch (e) {
+            emailInput.value = acc.pokemon_email || "";
+        }
+        emailInput.value = acc.pokemon_email || "";
+        emailInput.dispatchEvent(new Event('input', { bubbles: true }));
+        emailInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+        // Điền password
+        pwdInput.focus();
+        try {
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+            setter.call(pwdInput, acc.pokemon_password || "");
+        } catch (e) {
+            pwdInput.value = acc.pokemon_password || "";
+        }
+        pwdInput.value = acc.pokemon_password || "";
+        pwdInput.dispatchEvent(new Event('input', { bubbles: true }));
+        pwdInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+        if (window.$) {
+            try {
+                window.$(emailInput).val(acc.pokemon_email || "").trigger('input').trigger('change');
+                window.$(pwdInput).val(acc.pokemon_password || "").trigger('input').trigger('change');
+            } catch (e) {}
+        }
+
+        addLog(`Đã điền xong Email & Mật khẩu của [${acc.name || acc.pokemon_email}]!`, "success");
+        return true;
+    }
+
+    function submitLoginForm() {
+        const btn = findLoginSubmitButton();
+        if (btn) {
+            addLog(`Đang tự động bấm nút Đăng nhập: "${(btn.textContent || btn.value || '').trim()}"...`, "info");
+            btn.focus();
+            btn.click();
+            if (window.$) {
+                try { window.$(btn).trigger('click'); } catch (e) {}
+            }
+            addLog("Đã gửi yêu cầu đăng nhập! Đang chờ chuyển hướng...", "success");
+        } else {
+            addLog("Đã điền xong! Vui lòng bấm nút 'ログイン' trên màn hình.", "warn");
+        }
+    }
+
+    // =========================================================================
+    // XỬ LÝ NHẬP MÃ PASSCODE OTP (MFA)
+    // =========================================================================
+
     function findOtpInput() {
-        // 1. Tìm chính xác phần tử #authCode theo cấu trúc trang Factor2Auth
         const directAuthCode = document.getElementById("authCode");
         if (directAuthCode) return directAuthCode;
 
-        // 2. Tìm trong form #factor2AuthForm
         const formInput = document.querySelector('#factor2AuthForm input[name="dwfrm_factor2Auth_authCode"]') ||
                           document.querySelector('#factor2AuthForm input[type="text"]:not([readonly])');
         if (formInput) return formInput;
 
-        // 3. Tìm theo tên
         const byName = document.querySelector('input[name="dwfrm_factor2Auth_authCode"], input[name*="authCode"], input[name*="passcode"]');
         if (byName) return byName;
 
-        // 4. Tìm các input text thông thường (TUYỆT ĐỐI LOẠI TRỪ ô tìm kiếm search-field và widget bot)
         const candidateInputs = Array.from(document.querySelectorAll('input')).filter(input => {
             if (input.closest('#pk-auto-bot-container')) return false;
             if (input.closest('form[role="search"]') || input.name === 'q' || input.classList.contains('search-field')) return false;
@@ -208,7 +484,6 @@
         return candidateInputs[0] || null;
     }
 
-    // Hàm tìm chính xác nút xác thực '認証する'
     function findAuthButton() {
         const directBtn = document.getElementById("authBtn");
         if (directBtn) return directBtn;
@@ -225,15 +500,14 @@
         return candidateButtons[0] || null;
     }
 
-    // Gắn hook vào nút 'パスコードを再送する' của Pokémon Center
     function hookResendButton() {
         const resendBtn = document.getElementById("resendBtn");
         if (resendBtn && !resendBtn.__pkHooked) {
             resendBtn.__pkHooked = true;
             resendBtn.addEventListener("click", () => {
                 addLog("⚡ Bạn vừa bấm 'パスコードを再送する' trên web. Bot sẽ quét lại Gmail sau 3.5 giây...", "info");
-                if (pollTimer) clearTimeout(pollTimer);
-                isFetchingOtp = false;
+                if (STATE.pollTimer) clearTimeout(STATE.pollTimer);
+                STATE.isFetchingOtp = false;
                 setTimeout(() => {
                     fetchOtpFromLocalServer(0, false);
                 }, 3500);
@@ -241,13 +515,11 @@
         }
     }
 
-    // Điền và xác thực mã OTP
     function fillAndSubmitOtp(code) {
         if (!code) return;
         code = code.trim();
         addLog(`Đang tìm đúng ô Passcode và điền mã OTP [${code}]...`, "info");
 
-        // Cập nhật lên ô input dự phòng của widget để người dùng nhìn thấy
         const manualInput = document.getElementById("pk-manual-otp");
         if (manualInput) manualInput.value = code;
 
@@ -261,7 +533,6 @@
 
         targetInput.focus();
 
-        // Sử dụng setter native và gán giá trị
         try {
             const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
             nativeInputValueSetter.call(targetInput, code);
@@ -270,7 +541,6 @@
         }
         targetInput.value = code;
 
-        // Kích hoạt toàn bộ sự kiện để trang web và factor2Auth.js nhận diện
         targetInput.dispatchEvent(new Event('input', { bubbles: true }));
         targetInput.dispatchEvent(new Event('change', { bubbles: true }));
         targetInput.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: code[code.length - 1] }));
@@ -283,7 +553,6 @@
 
         addLog("Đã điền mã OTP vào #authCode thành công! Đang bấm nút '認証する'...", "success");
 
-        // Chờ 800ms để form validation cập nhật
         setTimeout(() => {
             const authBtn = findAuthButton();
             if (authBtn) {
@@ -300,39 +569,35 @@
         }, 800);
     }
 
-    // Kết nối tới OTP Server cục bộ (127.0.0.1:8765) để lấy mã từ Gmail
-    let isFetchingOtp = false;
-    let pollTimer = null;
-
     async function fetchOtpFromLocalServer(retryCount = 0, force = false) {
-        // Nếu người dùng bấm chủ động (retryCount = 0), luôn hủy lượt quét cũ để chạy ngay lập tức
         if (retryCount === 0) {
-            if (pollTimer) clearTimeout(pollTimer);
-            isFetchingOtp = false;
-        } else if (isFetchingOtp && retryCount > 0) {
-            // Đang chạy bước tiếp theo của loop
+            if (STATE.pollTimer) clearTimeout(STATE.pollTimer);
+            STATE.isFetchingOtp = false;
         }
 
         const btnFetchOtp = document.getElementById("pk-btn-fetch-otp");
-        isFetchingOtp = true;
+        STATE.isFetchingOtp = true;
         if (btnFetchOtp) {
             btnFetchOtp.disabled = true;
             btnFetchOtp.textContent = force ? "⏳ ĐANG LẤY MÃ GẦN NHẤT..." : `⏳ ĐANG QUÉT GMAIL... (${retryCount + 1}/25)`;
         }
 
+        const activeAcc = getActiveAccount();
+        const accountId = activeAcc ? activeAcc.id : "";
+        const emailAddr = activeAcc ? (activeAcc.otp_email || activeAcc.pokemon_email) : "";
         const lastOtp = force ? "" : (localStorage.getItem("pk_last_used_otp") || "");
 
         try {
-            const url = `http://127.0.0.1:8765/get-otp?exclude_otp=${encodeURIComponent(lastOtp)}${force ? "&force=1" : ""}`;
+            const url = `http://127.0.0.1:8765/get-otp?account_id=${encodeURIComponent(accountId)}&email=${encodeURIComponent(emailAddr)}&exclude_otp=${encodeURIComponent(lastOtp)}${force ? "&force=1" : ""}`;
             const res = await fetch(url);
             if (!res.ok) {
                 let errText = res.statusText;
                 try {
                     const errJson = await res.json();
                     errText = errJson.error || errText;
-                } catch(e) {}
+                } catch (e) {}
                 addLog(`Lỗi từ OTP Server: ${errText}`, "err");
-                isFetchingOtp = false;
+                STATE.isFetchingOtp = false;
                 if (btnFetchOtp) {
                     btnFetchOtp.disabled = false;
                     btnFetchOtp.textContent = "📩 ĐỌC OTP GMAIL & TỰ ĐIỀN";
@@ -344,9 +609,8 @@
 
             if (data.success && data.otp) {
                 addLog(`-> TÌM THẤY MÃ OTP MỚI: [${data.otp}] (Thư gửi cách đây ${data.age || 0}s)!`, "success");
-                // Lưu lại mã này để lần đăng nhập sau không bị lấy trùng
                 localStorage.setItem("pk_last_used_otp", data.otp);
-                isFetchingOtp = false;
+                STATE.isFetchingOtp = false;
                 if (btnFetchOtp) {
                     btnFetchOtp.disabled = false;
                     btnFetchOtp.textContent = "📩 ĐỌC OTP GMAIL & TỰ ĐIỀN";
@@ -358,13 +622,13 @@
             if (data.waiting) {
                 if (retryCount < 25) {
                     addLog(`[Chờ Gmail] ${data.error} (Lần ${retryCount + 1}/25, thử lại sau 2.5s)...`, "info");
-                    clearTimeout(pollTimer);
-                    pollTimer = setTimeout(() => {
+                    clearTimeout(STATE.pollTimer);
+                    STATE.pollTimer = setTimeout(() => {
                         fetchOtpFromLocalServer(retryCount + 1, force);
                     }, 2500);
                 } else {
                     addLog("Quá 60 giây chưa có thư mới. Hãy bấm 'パスコードを再送する' trên web hoặc bấm 'Lấy mã gần nhất ngay'!", "warn");
-                    isFetchingOtp = false;
+                    STATE.isFetchingOtp = false;
                     if (btnFetchOtp) {
                         btnFetchOtp.disabled = false;
                         btnFetchOtp.textContent = "📩 ĐỌC OTP GMAIL & TỰ ĐIỀN";
@@ -374,15 +638,15 @@
             }
 
             addLog(`Phản hồi: ${JSON.stringify(data)}`, "warn");
-            isFetchingOtp = false;
+            STATE.isFetchingOtp = false;
             if (btnFetchOtp) {
                 btnFetchOtp.disabled = false;
                 btnFetchOtp.textContent = "📩 ĐỌC OTP GMAIL & TỰ ĐIỀN";
             }
 
-        } catch(e) {
+        } catch (e) {
             addLog("Không thể kết nối tới OTP Server! Hãy chắc chắn file 'chay_otp_server.bat' đang mở.", "err");
-            isFetchingOtp = false;
+            STATE.isFetchingOtp = false;
             if (btnFetchOtp) {
                 btnFetchOtp.disabled = false;
                 btnFetchOtp.textContent = "📩 ĐỌC OTP GMAIL & TỰ ĐIỀN";
@@ -390,7 +654,10 @@
         }
     }
 
-    // Chờ Gigya Auth sẵn sàng
+    // =========================================================================
+    // XỬ LÝ QUÉT & ĐĂNG KÝ XỔ SỐ (LOTTERY PROCESS)
+    // =========================================================================
+
     function waitForGigya() {
         return new Promise((resolve) => {
             if (window.gigya && window.gigya.accounts && window.gigya.accounts.getJWT) {
@@ -410,7 +677,6 @@
         });
     }
 
-    // Lấy JWT Bearer Token từ Gigya
     function getJwtToken() {
         return new Promise((resolve, reject) => {
             if (!window.gigya || !window.gigya.accounts || !window.gigya.accounts.getJWT) {
@@ -432,17 +698,16 @@
         });
     }
 
-    // Toàn bộ quy trình Quét & Nộp đơn
     async function runBotProcess() {
         const runBtn = document.getElementById("pk-btn-execute");
         if (runBtn) runBtn.disabled = true;
 
-        addLog("Bắt đầu quy trình kiểm tra và đăng ký...", "info");
+        addLog("Bắt đầu quy trình kiểm tra và đăng ký xổ số...", "info");
 
         try {
             const gigyaReady = await waitForGigya();
             if (!gigyaReady) {
-                addLog("Chưa thể kết nối tới hệ thống xác thực Gigya. Hãy đợi trang tải xong.", "err");
+                addLog("Chưa thể kết nối tới Gigya Auth. Hãy đợi trang tải xong.", "err");
                 if (runBtn) runBtn.disabled = false;
                 return;
             }
@@ -453,7 +718,7 @@
                 jwtData = await getJwtToken();
             } catch (err) {
                 addLog("Phiên đăng nhập đã hết hạn hoặc bạn chưa đăng nhập!", "err");
-                addLog("Vui lòng tải lại trang hoặc đăng nhập lại.", "warn");
+                addLog("Vui lòng đăng nhập lại tài khoản.", "warn");
                 if (runBtn) runBtn.disabled = false;
                 return;
             }
@@ -461,7 +726,6 @@
             const jwt = jwtData.token;
             addLog("Đã lấy Bearer Token thành công.", "success");
 
-            // Cập nhật thông tin email lên widget nếu có
             try {
                 const payload = JSON.parse(atob(jwt.split(".")[1]));
                 const emailSpan = document.getElementById("pk-user-email");
@@ -470,7 +734,6 @@
                 }
             } catch (e) {}
 
-            // Gọi API lấy danh sách xổ số
             addLog("Đang tải danh sách các sản phẩm xổ số...", "info");
             const listUrl = (window.ajaxUrl && window.ajaxUrl.getLotteryListUrl) ?
                 window.ajaxUrl.getLotteryListUrl : "/a/ltr/api/lottery/v1/get-lottery-list";
@@ -499,49 +762,47 @@
             const filterMode = localStorage.getItem("pk_filter_mode") || "unverified_only";
             addLog(`Bộ lọc đang chọn: ${filterMode === "unverified_only" ? "Chỉ [本人未認証枠]" : (filterMode === "verified_only" ? "Chỉ [本人認証済み枠]" : "Tất cả các khung")}`, "info");
 
-            items.forEach((lottery) => {
-                const status = String(lottery.applicationStatus);
-                const title = lottery.lotteryTitle || lottery.lotteryGroupId;
+            for (const grp of items) {
+                const groupTitle = grp.lotteryGroupTitle || "Không rõ tên";
+                const isUnverifiedFrame = groupTitle.includes("【本人未認証枠】") || groupTitle.includes("本人未認証枠");
+                const isVerifiedFrame = groupTitle.includes("【本人認証済み枠】") || groupTitle.includes("本人認証済み枠");
 
-                if (status === "30") { // 受付中 - Đang mở
-                    const isVerified = title.includes("本人認証済み枠");
-                    const isUnverified = title.includes("本人未認証枠");
-
-                    // Chỉ nộp cho 本人未認証枠 (Mặc định)
-                    if (filterMode === "unverified_only" && isVerified) {
-                        addLog(`[BỎ QUA - Khung認証済み]: ${title}`, "warn");
-                        return;
-                    }
-                    if (filterMode === "verified_only" && isUnverified) {
-                        addLog(`[BỎ QUA - Khung未認証]: ${title}`, "warn");
-                        return;
-                    }
-
-                    const prize = (lottery.applicationItems && lottery.applicationItems.length > 0) ?
-                        lottery.applicationItems[0].itemPrizeId : null;
-                    toApplyList.push({
-                        groupId: lottery.lotteryGroupId,
-                        prizeId: prize,
-                        title: title
-                    });
-                } else if (status === "40") {
-                    appliedCount++;
+                if (filterMode === "unverified_only" && !isUnverifiedFrame) {
+                    continue;
+                } else if (filterMode === "verified_only" && !isVerifiedFrame) {
+                    continue;
                 }
-            });
 
-            const openCountSpan = document.getElementById("pk-open-count");
-            const appliedCountSpan = document.getElementById("pk-applied-count");
-            if (openCountSpan) openCountSpan.textContent = toApplyList.length;
-            if (appliedCountSpan) appliedCountSpan.textContent = appliedCount;
+                const prizes = grp.itemPrizeList || [];
+                for (const p of prizes) {
+                    const status = p.status;
+                    const prizeName = p.itemPrizeName || "";
+                    const fullTitle = `${groupTitle} - ${prizeName}`;
+
+                    if (status === 30) {
+                        toApplyList.push({
+                            groupId: grp.lotteryGroupId,
+                            prizeId: p.itemPrizeId,
+                            title: fullTitle
+                        });
+                    } else if (status === 40) {
+                        appliedCount++;
+                    }
+                }
+            }
+
+            const openSpan = document.getElementById("pk-open-count");
+            const appliedSpan = document.getElementById("pk-applied-count");
+            if (openSpan) openSpan.textContent = toApplyList.length;
+            if (appliedSpan) appliedSpan.textContent = appliedCount;
 
             if (toApplyList.length === 0) {
-                addLog("Hiện KHÔNG CÓ sản phẩm nào ở trạng thái 'ĐANG MỞ ĐĂNG KÝ (受付中)' cần nộp đơn.", "warn");
+                addLog(`Tất cả sản phẩm phù hợp đã được nộp hoặc chưa mở. Hoàn thành!`, "success");
                 if (runBtn) runBtn.disabled = false;
                 return;
             }
 
-            addLog(`Phát hiện ${toApplyList.length} sản phẩm ĐANG MỞ ĐĂNG KÝ. Bắt đầu gửi đơn...`, "success");
-
+            addLog(`Đang bắt đầu nộp đơn cho ${toApplyList.length} sản phẩm hợp lệ...`, "info");
             const applyUrl = (window.ajaxUrl && window.ajaxUrl.applyLotteryUrl) ?
                 window.ajaxUrl.applyLotteryUrl : "/a/ltr/api/lottery/v1/apply-lottery";
 
@@ -575,7 +836,6 @@
                     addLog(`-> Lỗi kết nối khi đăng ký: ${applyErr.message}`, "err");
                 }
 
-                // Chờ 1.5 giây giữa các lượt nộp để tránh dồn dập
                 await new Promise(r => setTimeout(r, 1500));
             }
 
@@ -593,13 +853,285 @@
         }
     }
 
-    // Khởi tạo khi DOM sẵn sàng
-    function init() {
-        createWidget();
+    // =========================================================================
+    // KHỞI TẠO FLOATING WIDGET GIAO DIỆN
+    // =========================================================================
 
-        // Nếu đang ở trang apply.html và được bật tự động
+    function createWidget() {
+        if (document.getElementById("pk-auto-bot-container")) return;
+
         const path = window.location.pathname.toLowerCase();
-        if (path.includes("lottery/apply.html")) {
+        const isMfaPage = path.includes("mfa") || path.includes("passcode");
+        const isLoginPage = (path.includes("login") || path.endsWith("/login/")) && !isMfaPage;
+
+        const container = document.createElement("div");
+        container.id = "pk-auto-bot-container";
+
+        container.innerHTML = `
+            <div id="pk-bot-header">
+                <div class="pk-title">
+                    <span>⚡ PKM Auto Lottery</span>
+                </div>
+                <div class="pk-controls">
+                    <button class="pk-btn-icon" id="pk-toggle-btn" title="Thu nhỏ/Mở rộng">−</button>
+                </div>
+            </div>
+            <div id="pk-bot-body">
+                <!-- KHỐI CHỌN TÀI KHOẢN (LUÔN XUẤT HIỆN) -->
+                <div class="pk-acc-selector-box">
+                    <div class="pk-acc-row">
+                        <span style="font-weight: 600; color: #a4b0be; font-size: 11px;">👤 Chọn tài khoản:</span>
+                        <button class="pk-btn-manage" id="pk-btn-open-modal">⚙️ Quản lý nick</button>
+                    </div>
+                    <div class="pk-acc-row" style="margin-top: 2px;">
+                        <select id="pk-acc-dropdown" class="pk-acc-select"></select>
+                    </div>
+                </div>
+
+                ${isMfaPage ? `
+                    <!-- GIAO DIỆN TRANG NHẬP PASSCODE OTP -->
+                    <div class="pk-status-box">
+                        <div style="color: #2ed573; font-weight: bold; margin-bottom: 4px;">📩 BƯỚC NHẬP PASSCODE OTP</div>
+                        <div class="pk-status-item">
+                            <span>Nick đang chọn:</span>
+                            <span class="pk-status-val info" id="pk-mfa-acc-name">--</span>
+                        </div>
+                        <div class="pk-status-item">
+                            <span>Gmail đọc OTP:</span>
+                            <span class="pk-status-val success" id="pk-mfa-acc-otp-mail">--</span>
+                        </div>
+                    </div>
+                    <button class="pk-btn-run" id="pk-btn-fetch-otp" style="background: linear-gradient(135deg, #ff4757, #ee1515);">
+                        📩 ĐỌC OTP GMAIL & TỰ ĐIỀN
+                    </button>
+                    <div style="display: flex; justify-content: flex-end; margin-top: 3px; margin-bottom: 3px;">
+                        <a href="javascript:void(0)" id="pk-btn-force-otp" style="color: #ffa502; font-size: 11px; text-decoration: underline; cursor: pointer;">Lấy mã gần nhất ngay (Bỏ qua kiểm tra)</a>
+                    </div>
+                    <div style="display: flex; gap: 6px; margin-top: 4px;">
+                        <input type="text" id="pk-manual-otp" placeholder="Hoặc dán 6 số OTP vào đây" style="flex: 1; padding: 6px 8px; border-radius: 6px; border: 1px solid #57606f; background: #2f3542; color: #fff; font-size: 12px; outline: none;">
+                        <button id="pk-btn-fill-otp" style="padding: 6px 12px; background: #2ed573; border: none; border-radius: 6px; color: #fff; font-weight: bold; cursor: pointer; font-size: 12px;">Điền</button>
+                    </div>
+                    <div id="pk-bot-logs"></div>
+                ` : isLoginPage ? `
+                    <!-- GIAO DIỆN TRANG ĐĂNG NHẬP -->
+                    <div class="pk-status-box">
+                        <div style="color: #ffa502; font-weight: bold; margin-bottom: 6px;">🔑 ĐĂNG NHẬP POKÉMON CENTER</div>
+                        <div class="pk-status-item">
+                            <span>Nick đang chọn:</span>
+                            <span class="pk-status-val info" id="pk-login-acc-name">--</span>
+                        </div>
+                        <div class="pk-status-item">
+                            <span>Email đăng nhập:</span>
+                            <span class="pk-status-val warn" id="pk-login-acc-email">--</span>
+                        </div>
+                        <div class="pk-status-item">
+                            <span>Gmail nhận OTP:</span>
+                            <span class="pk-status-val success" id="pk-login-acc-otp-mail">--</span>
+                        </div>
+                    </div>
+                    <div class="pk-row" style="padding: 2px 0;">
+                        <span class="pk-switch-label" style="font-size: 11px;">Tự đăng nhập khi mở trang:</span>
+                        <label class="pk-switch">
+                            <input type="checkbox" id="pk-auto-login-toggle">
+                            <span class="pk-slider"></span>
+                        </label>
+                    </div>
+                    <button class="pk-btn-run" id="pk-btn-do-login" style="background: linear-gradient(135deg, #ffa502, #ff7f50);">
+                        🔑 TỰ ĐIỀN & BẤM ĐĂNG NHẬP
+                    </button>
+                    <div id="pk-bot-logs"></div>
+                ` : `
+                    <!-- GIAO DIỆN TRANG XỔ SỐ APPLY.HTML -->
+                    <div class="pk-row">
+                        <span class="pk-switch-label">Tự động nộp khi mở trang:</span>
+                        <label class="pk-switch">
+                            <input type="checkbox" id="pk-auto-toggle" ${CONFIG.autoRunOnLoad ? "checked" : ""}>
+                            <span class="pk-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="pk-row" style="margin-top: 2px;">
+                        <span class="pk-switch-label">Loại khung đăng ký:</span>
+                        <select id="pk-filter-mode" style="background: #2f3542; color: #2ed573; font-weight: bold; border: 1px solid #57606f; border-radius: 6px; padding: 4px 6px; font-size: 11px; outline: none; cursor: pointer; max-width: 170px;">
+                            <option value="unverified_only" selected>Chỉ [本人未認証枠]</option>
+                            <option value="verified_only">Chỉ [本人認証済み枠]</option>
+                            <option value="all">Tất cả các khung</option>
+                        </select>
+                    </div>
+
+                    <div class="pk-status-box">
+                        <div class="pk-status-item">
+                            <span>Tài khoản:</span>
+                            <span class="pk-status-val info" id="pk-user-email">Đang kiểm tra...</span>
+                        </div>
+                        <div class="pk-status-item">
+                            <span>Cần nộp đơn:</span>
+                            <span class="pk-status-val warn" id="pk-open-count">0</span>
+                        </div>
+                        <div class="pk-status-item">
+                            <span>Đã hoàn thành:</span>
+                            <span class="pk-status-val success" id="pk-applied-count">0</span>
+                        </div>
+                    </div>
+
+                    <button class="pk-btn-run" id="pk-btn-execute">🚀 QUÉT & NỘP ĐƠN NGAY</button>
+                    <div style="margin-top: 4px;">
+                        <a href="https://www.pokemoncenter-online.com/login/" style="display: block; text-align: center; font-size: 11px; color: #a4b0be; text-decoration: underline;">Đăng xuất / Chuyển tài khoản khác</a>
+                    </div>
+                    <div id="pk-bot-logs"></div>
+                `}
+            </div>
+        `;
+
+        document.body.appendChild(container);
+
+        // Nút thu nhỏ
+        const toggleBtn = document.getElementById("pk-toggle-btn");
+        if (toggleBtn) {
+            toggleBtn.addEventListener("click", () => {
+                container.classList.toggle("minimized");
+                toggleBtn.textContent = container.classList.contains("minimized") ? "+" : "−";
+            });
+        }
+
+        // Dropdown chọn nick
+        const accDropdown = document.getElementById("pk-acc-dropdown");
+        if (accDropdown) {
+            accDropdown.addEventListener("change", (e) => {
+                if (e.target.value === "__new__") {
+                    openAccountModal(null);
+                    renderAccountDropdown();
+                } else {
+                    setActiveAccount(e.target.value);
+                }
+            });
+        }
+
+        // Nút mở modal quản lý nick
+        const btnOpenModal = document.getElementById("pk-btn-open-modal");
+        if (btnOpenModal) {
+            btnOpenModal.addEventListener("click", () => {
+                openAccountModal(null);
+            });
+        }
+
+        // Xử lý trang Đăng nhập
+        const btnDoLogin = document.getElementById("pk-btn-do-login");
+        if (btnDoLogin) {
+            btnDoLogin.addEventListener("click", () => {
+                const acc = getActiveAccount();
+                if (fillLoginForm(acc)) {
+                    setTimeout(() => {
+                        submitLoginForm();
+                    }, 500);
+                }
+            });
+        }
+        const autoLoginToggle = document.getElementById("pk-auto-login-toggle");
+        if (autoLoginToggle) {
+            const savedAutoLogin = localStorage.getItem("pk_auto_login") === "1";
+            autoLoginToggle.checked = savedAutoLogin;
+            autoLoginToggle.addEventListener("change", (e) => {
+                localStorage.setItem("pk_auto_login", e.target.checked ? "1" : "0");
+                addLog(`Đã ${e.target.checked ? "BẬT" : "TẮT"} tự động đăng nhập khi vào trang.`, "info");
+            });
+        }
+
+        // Xử lý trang MFA OTP
+        const btnFetchOtp = document.getElementById("pk-btn-fetch-otp");
+        if (btnFetchOtp) {
+            btnFetchOtp.addEventListener("click", () => {
+                fetchOtpFromLocalServer(0, false);
+            });
+        }
+        const btnForceOtp = document.getElementById("pk-btn-force-otp");
+        if (btnForceOtp) {
+            btnForceOtp.addEventListener("click", () => {
+                addLog("Đang ép đọc mã mới nhất bất kể lượt trước...", "info");
+                fetchOtpFromLocalServer(0, true);
+            });
+        }
+        const btnFillManual = document.getElementById("pk-btn-fill-otp");
+        if (btnFillManual) {
+            btnFillManual.addEventListener("click", () => {
+                const manualCode = document.getElementById("pk-manual-otp").value.trim();
+                if (manualCode) {
+                    fillAndSubmitOtp(manualCode);
+                } else {
+                    addLog("Vui lòng nhập mã OTP 6 số!", "warn");
+                }
+            });
+        }
+
+        // Xử lý trang xổ số
+        const autoToggle = document.getElementById("pk-auto-toggle");
+        if (autoToggle) {
+            autoToggle.addEventListener("change", (e) => {
+                CONFIG.autoRunOnLoad = e.target.checked;
+                localStorage.setItem("pk_auto_run", e.target.checked ? "1" : "0");
+                addLog(`Đã ${e.target.checked ? "BẬT" : "TẮT"} chế độ tự động nộp khi vào trang.`, "info");
+            });
+            const savedPref = localStorage.getItem("pk_auto_run");
+            if (savedPref !== null) {
+                autoToggle.checked = savedPref === "1";
+                CONFIG.autoRunOnLoad = savedPref === "1";
+            }
+        }
+
+        const filterSelect = document.getElementById("pk-filter-mode");
+        if (filterSelect) {
+            const savedFilter = localStorage.getItem("pk_filter_mode") || "unverified_only";
+            filterSelect.value = savedFilter;
+            filterSelect.addEventListener("change", (e) => {
+                localStorage.setItem("pk_filter_mode", e.target.value);
+                addLog(`Đã đổi bộ lọc: ${e.target.options[e.target.selectedIndex].text}`, "info");
+            });
+        }
+
+        const runBtn = document.getElementById("pk-btn-execute");
+        if (runBtn) {
+            runBtn.addEventListener("click", () => {
+                runBotProcess();
+            });
+        }
+
+        hookResendButton();
+    }
+
+    // =========================================================================
+    // KHỞI ĐỘNG HỆ THỐNG
+    // =========================================================================
+
+    async function init() {
+        createWidget();
+        await loadAccounts();
+
+        const path = window.location.pathname.toLowerCase();
+
+        // 1. Nếu đang ở trang đăng nhập
+        if (path.includes("login") && !path.includes("mfa")) {
+            const activeAcc = getActiveAccount();
+            const shouldAutoLogin = localStorage.getItem("pk_auto_login") === "1";
+
+            setTimeout(() => {
+                if (fillLoginForm(activeAcc) && shouldAutoLogin) {
+                    addLog("Tự động đăng nhập sau 1.5 giây...", "info");
+                    setTimeout(() => {
+                        submitLoginForm();
+                    }, 1500);
+                }
+            }, 800);
+        }
+        // 2. Nếu đang ở trang nhập mã OTP
+        else if (path.includes("mfa") || path.includes("passcode")) {
+            hookResendButton();
+            addLog("Đang ở trang xác thực OTP. Đang thử kết nối Gmail lấy mã sau 3 giây...", "info");
+            setTimeout(() => {
+                fetchOtpFromLocalServer(0, false);
+            }, 3000);
+        }
+        // 3. Nếu đang ở trang nộp đơn xổ số
+        else if (path.includes("lottery/apply.html")) {
             const savedPref = localStorage.getItem("pk_auto_run");
             const shouldAutoRun = (savedPref === null) ? true : (savedPref === "1");
 
@@ -611,12 +1143,6 @@
             } else {
                 addLog("Chế độ tự động đang TẮT. Bạn có thể bấm nút màu xanh để chạy bất cứ lúc nào.", "info");
             }
-        } else if (path.includes("mfa") || path.includes("passcode")) {
-            addLog("Đang ở trang xác thực OTP. Đang thử kết nối Gmail lấy mã sau 3 giây...", "info");
-            hookResendButton();
-            setTimeout(() => {
-                fetchOtpFromLocalServer(0, false);
-            }, 3000);
         }
     }
 
