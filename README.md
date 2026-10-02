@@ -1,36 +1,39 @@
-# HƯỚNG DẪN SỬ DỤNG TOOL TỰ ĐỘNG ĐẶT HÀNG / XỔ SỐ POKEMON CENTER ONLINE
+# HỆ THỐNG TỰ ĐỘNG ĐĂNG KÝ BỐC THĂM POKÉMON CENTER ONLINE (MULTI-ACCOUNT)
 
-Dự án này tự động hóa quy trình đăng ký mua bốc thăm xổ số (抽選販売 - Lottery Application) tại website **Pokémon Center Online Japan** (`https://www.pokemoncenter-online.com/lottery/apply.html`), tái hiện chính xác toàn bộ thao tác trong file HAR của bạn.
-
----
-
-## 📁 Danh sách tệp tin trong dự án:
-
-1. [auto_lottery.py](file:///c:/Users/Admin/Desktop/pokemon/auto_lottery.py): Script Python chính thực hiện tự động hóa.
-2. [run_tool.bat](file:///c:/Users/Admin/Desktop/pokemon/run_tool.bat): File bấm đúp để chạy kiểm tra và đăng ký 1 lần ngay lập tức.
-3. [run_monitor_10m.bat](file:///c:/Users/Admin/Desktop/pokemon/run_monitor_10m.bat): File bấm đúp để chạy chế độ canh định kỳ (10 phút quét 1 lần).
-4. `screenshots/`: Thư mục tự động lưu ảnh chụp màn hình kết quả sau khi đăng ký thành công.
-5. `chrome_profile/`: Thư mục lưu phiên đăng nhập của Google Chrome (giúp bạn không cần đăng nhập lại ở những lần chạy sau).
+Dự án tự động hóa đăng ký xổ số (抽選販売 - Lottery Application) tại website **Pokémon Center Online Japan** (`https://www.pokemoncenter-online.com/lottery/apply.html`), hỗ trợ:
+1. **Lọc thông minh:** Tự động lọc chỉ nộp đơn cho **`【本人未認証枠】`** (bỏ qua `【本人認証済み枠】`).
+2. **Chạy đa tài khoản (Multi-Account Orchestrator):** Quản lý nhiều tài khoản độc lập, mỗi nick chỉ cần đăng nhập 1 lần, tool tự động chuyển nick và nộp đơn tuần tự.
+3. **Chrome Extension độc lập:** Có thể cài trực tiếp vào trình duyệt cá nhân để dùng thủ công bất kỳ lúc nào.
 
 ---
 
-## 🚀 Cách sử dụng:
+## 📁 Danh sách tệp tin chính:
 
-### Cách 1: Chạy 1 lần (Đăng ký ngay các sản phẩm đang mở)
-1. Bấm đúp vào file [run_tool.bat](file:///c:/Users/Admin/Desktop/pokemon/run_tool.bat).
-2. Trình duyệt Chrome sẽ tự động bật lên.
-3. **Lần đầu tiên chạy:** Nếu chưa đăng nhập, tool sẽ nhắc bạn đăng nhập tài khoản trên cửa sổ Chrome đó (nhập email, pass và mã OTP nếu có).
-4. Sau khi đăng nhập, tool sẽ:
-   - Tự động quét toàn bộ danh sách sản phẩm.
-   - Tìm các mục có trạng thái **ĐANG MỞ ĐĂNG KÝ (受付中)**.
-   - Tự động tích chọn sản phẩm, tích đồng ý điều khoản và gửi lệnh đăng ký (`apply-lottery`).
-   - Tải lại trang và chụp ảnh xác nhận lưu vào thư mục `screenshots/`.
-
-### Cách 2: Chế độ tự động canh đợt mở bán mới (Monitor)
-* Bấm đúp vào file [run_monitor_10m.bat](file:///c:/Users/Admin/Desktop/pokemon/run_monitor_10m.bat). Tool sẽ tự động kiểm tra định kỳ mỗi 10 phút. Hễ có sản phẩm mới mở đăng ký, tool sẽ nộp đơn ngay lập tức.
+| Tệp tin | Chức năng |
+| :--- | :--- |
+| **`them_tai_khoan_moi.bat`** | Bấm đúp để thêm tài khoản mới và đăng nhập lần đầu (nhập pass + OTP). Phiên đăng nhập sẽ được lưu vĩnh viễn. |
+| **`chay_tat_ca_tai_khoan.bat`** | Bấm đúp để tự động chạy bốc thăm cho tất cả các tài khoản lần lượt từ đầu đến cuối. |
+| **`profiles.json`** | Danh sách cấu hình các tài khoản (hỗ trợ gán Proxy riêng cho từng nick nếu cần). |
+| **`multi_runner.py`** | Script Python điều phối đa tài khoản. |
+| **`pokemon-lottery-extension/`** | Thư mục Chrome Extension đã tích hợp sẵn bộ lọc `【本人未認証枠】`. |
+| **`screenshots/`** | Thư mục tự động lưu ảnh kết quả sau khi nộp đơn thành công cho từng nick. |
 
 ---
 
-## 🔒 An toàn & Bảo mật:
-- Tool sử dụng trình duyệt Chrome thật, kế thừa 100% IP, cookie và vân tay trình duyệt của bạn nên **vượt qua an toàn hệ thống chống bot ZeroNaught WAF** và **Google reCAPTCHA Enterprise**.
-- Không lưu mật khẩu của bạn vào code (đăng nhập trực tiếp trên trình duyệt chính thống).
+## 🚀 HƯỚNG DẪN SỬ DỤNG ĐA TÀI KHOẢN:
+
+### Bước 1: Thêm và đăng nhập các tài khoản (Chỉ làm 1 lần duy nhất)
+1. Bấm đúp vào file **`them_tai_khoan_moi.bat`**.
+2. Nhập tên tài khoản (Ví dụ: `Nick_1`, `Nick_2`, `Nick_3`...).
+3. Một cửa sổ Google Chrome riêng biệt sẽ mở ra (đã nạp sẵn Extension).
+4. Bạn đăng nhập email, mật khẩu và nhập mã OTP SMS trên trình duyệt đó.
+5. Sau khi đăng nhập thành công vào trang web, nhấn **Enter** trong cửa sổ đen hoặc đóng trình duyệt lại.
+6. Lặp lại với các nick tiếp theo.
+
+### Bước 2: Chạy tự động tất cả các nick
+1. Bấm đúp vào file **`chay_tat_ca_tai_khoan.bat`**.
+2. Tool sẽ tự động:
+   * Mở `Nick_1` -> Chờ Extension tự nộp đơn cho khung `【本人未認証枠】` -> Chụp ảnh màn hình lưu lại -> Đóng `Nick_1`.
+   * Tạm nghỉ ngẫu nhiên 4 - 8 giây (để tránh bị coi là spam).
+   * Mở tiếp `Nick_2` -> Nộp đơn -> Chụp ảnh -> Đóng `Nick_2`...
+   * Cứ thế chạy tuần tự cho đến hết tất cả các tài khoản và xuất bảng báo cáo tổng kết.

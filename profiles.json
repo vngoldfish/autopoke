@@ -1,0 +1,12 @@
+[
+  {
+    "name": "TaiKhoan_1",
+    "enabled": true,
+    "proxy": ""
+  },
+  {
+    "name": "TaiKhoan_2",
+    "enabled": true,
+    "proxy": ""
+  }
+]

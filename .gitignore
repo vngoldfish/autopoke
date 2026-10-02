@@ -1,6 +1,7 @@
 # Chrome user data and cache
 chrome_profile/
 chrome_user_data/
+profiles/
 
 # Screenshots
 screenshots/
