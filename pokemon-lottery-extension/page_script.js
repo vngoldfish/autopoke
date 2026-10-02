@@ -1097,6 +1097,7 @@
                     <span>⚡ PKM Auto Lottery</span>
                 </div>
                 <div class="pk-controls">
+                    <button class="pk-btn-icon" id="pk-expand-btn" title="Phóng to / Thu nhỏ giao diện">⛶</button>
                     <button class="pk-btn-icon" id="pk-toggle-btn" title="Thu nhỏ/Mở rộng">−</button>
                 </div>
             </div>
@@ -1135,6 +1136,13 @@
                         <input type="text" id="pk-manual-otp" placeholder="Hoặc dán 6 số OTP vào đây" style="flex: 1; padding: 6px 8px; border-radius: 6px; border: 1px solid #57606f; background: #2f3542; color: #fff; font-size: 12px; outline: none;">
                         <button id="pk-btn-fill-otp" style="padding: 6px 12px; background: #2ed573; border: none; border-radius: 6px; color: #fff; font-weight: bold; cursor: pointer; font-size: 12px;">Điền</button>
                     </div>
+                    <div class="pk-logs-header">
+                        <span class="pk-logs-title">📋 KẾT QUẢ & NHẬT KÝ</span>
+                        <div class="pk-logs-actions">
+                            <button type="button" class="pk-logs-btn pk-btn-clear-logs" title="Xóa màn hình kết quả">🗑️ Xóa</button>
+                            <button type="button" class="pk-logs-btn pk-btn-expand-logs" title="Phóng to / Thu nhỏ ô kết quả">⛶ Phóng to</button>
+                        </div>
+                    </div>
                     <div id="pk-bot-logs"></div>
                 ` : isLoginPage ? `
                     <!-- GIAO DIỆN TRANG ĐĂNG NHẬP -->
@@ -1163,6 +1171,13 @@
                     <button class="pk-btn-run" id="pk-btn-do-login" style="background: linear-gradient(135deg, #ffa502, #ff7f50);">
                         🔑 TỰ ĐIỀN & BẤM ĐĂNG NHẬP
                     </button>
+                    <div class="pk-logs-header">
+                        <span class="pk-logs-title">📋 KẾT QUẢ & NHẬT KÝ</span>
+                        <div class="pk-logs-actions">
+                            <button type="button" class="pk-logs-btn pk-btn-clear-logs" title="Xóa màn hình kết quả">🗑️ Xóa</button>
+                            <button type="button" class="pk-logs-btn pk-btn-expand-logs" title="Phóng to / Thu nhỏ ô kết quả">⛶ Phóng to</button>
+                        </div>
+                    </div>
                     <div id="pk-bot-logs"></div>
                 ` : `
                     <!-- GIAO DIỆN TRANG XỔ SỐ APPLY.HTML -->
@@ -1209,6 +1224,13 @@
                     <div style="margin-top: 4px;">
                         <a href="https://www.pokemoncenter-online.com/login/" style="display: block; text-align: center; font-size: 11px; color: #a4b0be; text-decoration: underline;">Đăng xuất / Chuyển tài khoản khác</a>
                     </div>
+                    <div class="pk-logs-header">
+                        <span class="pk-logs-title">📋 KẾT QUẢ & NHẬT KÝ</span>
+                        <div class="pk-logs-actions">
+                            <button type="button" class="pk-logs-btn pk-btn-clear-logs" title="Xóa màn hình kết quả">🗑️ Xóa</button>
+                            <button type="button" class="pk-logs-btn pk-btn-expand-logs" title="Phóng to / Thu nhỏ ô kết quả">⛶ Phóng to</button>
+                        </div>
+                    </div>
                     <div id="pk-bot-logs"></div>
                 `}
             </div>
@@ -1224,6 +1246,33 @@
                 toggleBtn.textContent = container.classList.contains("minimized") ? "+" : "−";
             });
         }
+
+        // Nút phóng to / thu nhỏ giao diện & ô kết quả
+        function toggleExpand() {
+            container.classList.toggle("pk-expanded");
+            const isExp = container.classList.contains("pk-expanded");
+            const expandHeaderBtn = document.getElementById("pk-expand-btn");
+            if (expandHeaderBtn) expandHeaderBtn.textContent = isExp ? "🗗" : "⛶";
+            document.querySelectorAll(".pk-btn-expand-logs").forEach(b => {
+                b.textContent = isExp ? "🗗 Thu nhỏ" : "⛶ Phóng to";
+            });
+        }
+
+        const expandBtn = document.getElementById("pk-expand-btn");
+        if (expandBtn) {
+            expandBtn.addEventListener("click", toggleExpand);
+        }
+
+        document.querySelectorAll(".pk-btn-expand-logs").forEach(b => {
+            b.addEventListener("click", toggleExpand);
+        });
+
+        document.querySelectorAll(".pk-btn-clear-logs").forEach(b => {
+            b.addEventListener("click", () => {
+                const logBox = document.getElementById("pk-bot-logs");
+                if (logBox) logBox.innerHTML = "";
+            });
+        });
 
         // Dropdown chọn nick
         const accDropdown = document.getElementById("pk-acc-dropdown");

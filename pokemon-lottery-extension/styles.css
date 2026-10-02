@@ -3,8 +3,8 @@
     position: fixed;
     top: 20px;
     right: 20px;
-    width: 360px;
-    max-width: 90vw;
+    width: 420px;
+    max-width: 95vw;
     background: #1e1e24;
     color: #f1f2f6;
     border-radius: 12px;
@@ -13,7 +13,12 @@
     font-size: 13px;
     z-index: 9999999;
     overflow: hidden;
-    transition: all 0.3s ease;
+    transition: width 0.3s ease, height 0.3s ease;
+}
+
+#pk-auto-bot-container.pk-expanded {
+    width: 640px;
+    max-width: 96vw;
 }
 
 #pk-auto-bot-container * {
@@ -69,10 +74,11 @@
 
 #pk-bot-body {
     padding: 14px;
-    max-height: 480px;
+    max-height: 88vh;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
 }
 
 .pk-row {
@@ -185,28 +191,76 @@ input:checked + .pk-slider:before {
 .pk-status-val.warn { color: #ffa502; }
 .pk-status-val.info { color: #70a1ff; }
 
+/* Logs Header & Actions */
+.pk-logs-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 4px;
+    margin-bottom: 4px;
+    padding: 0 2px;
+}
+
+.pk-logs-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #a4b0be;
+    letter-spacing: 0.5px;
+}
+
+.pk-logs-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.pk-logs-btn {
+    background: #2f3542;
+    border: 1px solid #57606f;
+    border-radius: 4px;
+    color: #ced6e0;
+    font-size: 11px;
+    padding: 2px 8px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.pk-logs-btn:hover {
+    background: #57606f;
+    color: #fff;
+}
+
 /* Log Console */
 #pk-bot-logs {
-    background: #0f0f14;
+    background: #0f1015;
     border: 1px solid #2f3542;
     border-radius: 8px;
-    padding: 8px 10px;
-    height: 150px;
+    padding: 10px 12px;
+    height: 250px;
+    min-height: 180px;
+    max-height: 600px;
+    resize: vertical;
     overflow-y: auto;
-    font-family: Consolas, monospace;
-    font-size: 11px;
-    line-height: 1.5;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+#pk-auto-bot-container.pk-expanded #pk-bot-logs {
+    height: 440px;
+    font-size: 13px;
 }
 
 .pk-log-line {
-    margin-bottom: 3px;
-    word-break: break-all;
+    margin-bottom: 4px;
+    word-break: break-word;
+    white-space: pre-wrap;
 }
 
-.pk-log-time { color: #747d8c; }
+.pk-log-time { color: #747d8c; margin-right: 4px; font-weight: normal; }
 .pk-log-info { color: #f1f2f6; }
-.pk-log-success { color: #2ed573; font-weight: bold; }
-.pk-log-warn { color: #eccc68; }
+.pk-log-success { color: #2ed573; font-weight: 600; }
+.pk-log-warn { color: #ffa502; font-weight: 600; }
 .pk-log-err { color: #ff4757; font-weight: bold; }
 
 /* Account Selector Box */
