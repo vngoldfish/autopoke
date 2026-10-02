@@ -569,3 +569,15 @@ input:checked + .pk-slider:before {
     color: #eccc68;
 }
 
+.pk-item-badge.badge-frame-unverified {
+    background: rgba(46, 213, 115, 0.15);
+    color: #2ed573;
+    border: 1px solid rgba(46, 213, 115, 0.35);
+}
+
+.pk-item-badge.badge-frame-verified {
+    background: rgba(255, 165, 2, 0.15);
+    color: #ffa502;
+    border: 1px solid rgba(255, 165, 2, 0.35);
+}
+

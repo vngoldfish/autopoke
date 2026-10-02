@@ -896,8 +896,13 @@
             addLog(`• Đã hết hạn (kết thúc): ${endedList.length} giải`, "info");
             addLog(`==================================================`, "info");
 
-            // Cập nhật số đếm theo bộ lọc đang chọn
-            const filterMode = localStorage.getItem("pk_filter_mode") || "unverified_only";
+            // Cập nhật số đếm theo bộ lọc đang chọn (mặc định 'all' - hiển thị tất cả)
+            let filterMode = localStorage.getItem("pk_filter_mode") || "all";
+            if (filterMode === "unverified_only" && !localStorage.getItem("pk_filter_migrated_v2")) {
+                filterMode = "all";
+                localStorage.setItem("pk_filter_mode", "all");
+                localStorage.setItem("pk_filter_migrated_v2", "1");
+            }
             let filterRemain = 0;
             let filterDone = 0;
             if (filterMode === "unverified_only") {
@@ -989,7 +994,12 @@
         const listContainer = document.getElementById("pk-product-list-container");
         if (!listContainer) return;
 
-        const filterMode = localStorage.getItem("pk_filter_mode") || "unverified_only";
+        let filterMode = localStorage.getItem("pk_filter_mode") || "all";
+        if (filterMode === "unverified_only" && !localStorage.getItem("pk_filter_migrated_v2")) {
+            filterMode = "all";
+            localStorage.setItem("pk_filter_mode", "all");
+            localStorage.setItem("pk_filter_migrated_v2", "1");
+        }
         const items = CURRENT_SCANNED_ITEMS;
 
         const activeGroups = [];
@@ -1018,6 +1028,7 @@
                     title: groupTitle,
                     isApplied: isApplied,
                     frame: isUnverified ? "本人未認証枠" : (isVerified ? "本人認証済み枠" : "Khung chung"),
+                    frameClass: isUnverified ? "badge-frame-unverified" : (isVerified ? "badge-frame-verified" : "badge-frame"),
                     items: applicationItems,
                     endDate: formatJstDate(grp.applicationEndDatetime)
                 });
@@ -1032,8 +1043,8 @@
         if (activeGroups.length === 0) {
             listContainer.innerHTML = `
                 <div style="text-align: center; color: #ffa502; padding: 12px 6px; font-size: 11.5px;">
-                    Không có sản phẩm nào thuộc bộ lọc đang mở nhận đơn.<br>
-                    <span style="font-size: 10.5px; color: #a4b0be;">(Hãy thử đổi sang "Tất cả các khung" ở trên)</span>
+                    Không có sản phẩm nào đang mở nhận đơn.<br>
+                    <span style="font-size: 10.5px; color: #a4b0be;">(Hãy kiểm tra lại danh sách hoặc thử đổi bộ lọc)</span>
                 </div>
             `;
             updateExecuteButtonCount();
@@ -1055,7 +1066,7 @@
                             <div class="pk-item-info">
                                 <div class="pk-item-title">${prizeName}</div>
                                 <div class="pk-item-meta">
-                                    <span class="pk-item-badge badge-frame">${grp.frame}</span>
+                                    <span class="pk-item-badge ${grp.frameClass}">${grp.frame}</span>
                                     ${priceStr ? `<span>💰 ${priceStr}</span>` : ""}
                                     <span>⏰ Hạn: ${grp.endDate}</span>
                                 </div>
@@ -1075,7 +1086,7 @@
                                 <div class="pk-item-title">${prizeName}</div>
                                 <div class="pk-item-meta">
                                     <span class="pk-item-badge badge-open">🟢 Đang mở</span>
-                                    <span class="pk-item-badge badge-frame">${grp.frame}</span>
+                                    <span class="pk-item-badge ${grp.frameClass}">${grp.frame}</span>
                                     ${priceStr ? `<span>💰 ${priceStr}</span>` : ""}
                                     <span>⏰ Hạn: ${grp.endDate}</span>
                                 </div>
@@ -1350,11 +1361,11 @@
                     </div>
 
                     <div class="pk-row" style="margin-top: 2px;">
-                        <span class="pk-switch-label">Loại khung đăng ký:</span>
+                        <span class="pk-switch-label">Hiển thị danh sách:</span>
                         <select id="pk-filter-mode" style="background: #2f3542; color: #2ed573; font-weight: bold; border: 1px solid #57606f; border-radius: 6px; padding: 4px 6px; font-size: 11px; outline: none; cursor: pointer; max-width: 170px;">
-                            <option value="unverified_only" selected>Chỉ [本人未認証枠]</option>
+                            <option value="all" selected>Tất cả sản phẩm (Toàn bộ)</option>
+                            <option value="unverified_only">Chỉ [本人未認証枠]</option>
                             <option value="verified_only">Chỉ [本人認証済み枠]</option>
-                            <option value="all">Tất cả các khung</option>
                         </select>
                     </div>
 
@@ -1536,11 +1547,16 @@
 
         const filterSelect = document.getElementById("pk-filter-mode");
         if (filterSelect) {
-            const savedFilter = localStorage.getItem("pk_filter_mode") || "unverified_only";
+            let savedFilter = localStorage.getItem("pk_filter_mode") || "all";
+            if (savedFilter === "unverified_only" && !localStorage.getItem("pk_filter_migrated_v2")) {
+                savedFilter = "all";
+                localStorage.setItem("pk_filter_mode", "all");
+                localStorage.setItem("pk_filter_migrated_v2", "1");
+            }
             filterSelect.value = savedFilter;
             filterSelect.addEventListener("change", (e) => {
                 localStorage.setItem("pk_filter_mode", e.target.value);
-                addLog(`Đã đổi bộ lọc: ${e.target.options[e.target.selectedIndex].text}`, "info");
+                addLog(`Đã đổi chế độ hiển thị: ${e.target.options[e.target.selectedIndex].text}`, "info");
                 if (CURRENT_SCANNED_ITEMS && CURRENT_SCANNED_ITEMS.length > 0) {
                     renderProductChecklist();
                 } else {
