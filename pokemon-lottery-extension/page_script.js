@@ -771,27 +771,29 @@
             const json = await listRes.json();
             const items = json.data || [];
 
-            const filterMode = localStorage.getItem("pk_filter_mode") || "unverified_only";
-            const filterLabel = filterMode === "unverified_only" ? "Chỉ [本人未認証枠]" : (filterMode === "verified_only" ? "Chỉ [本人認証済み枠]" : "Tất cả các khung");
+            addLog(`==================================================`, "info");
+            addLog(`🔍 KẾT QUẢ KIỂM TRA TOÀN BỘ TRANG (TỔNG ${items.length} GIẢI)`, "info");
+            addLog(`==================================================`, "info");
 
-            addLog(`--------------------------------------------------`, "info");
-            addLog(`🔎 KẾT QUẢ QUÉT DANH SÁCH CHUUSEN (${filterLabel}):`, "info");
+            const needApplyList = [];      // Đang mở mà chưa nộp
+            const alreadyAppliedList = []; // Đang mở mà đã nộp rồi
+            const upcomingList = [];       // Sắp mở
+            const endedList = [];          // Đã hết hạn
 
-            const activeChuusenList = [];
-            const upcomingList = [];
-            let endedCount = 0;
+            let unverifiedTotal = 0;
+            let unverifiedApplied = 0;
+            let verifiedTotal = 0;
+            let verifiedApplied = 0;
 
             for (const grp of items) {
                 const groupTitle = grp.lotteryTitle || grp.lotteryGroupTitle || "Không rõ tên";
-                const isUnverifiedFrame = groupTitle.includes("【本人未認証枠】") || groupTitle.includes("本人未認証枠");
-                const isVerifiedFrame = groupTitle.includes("【本人認証済み枠】") || groupTitle.includes("本人認証済み枠");
-
-                if (filterMode === "unverified_only" && !isUnverifiedFrame) continue;
-                if (filterMode === "verified_only" && !isVerifiedFrame) continue;
+                const isUnverified = groupTitle.includes("【本人未認証枠】") || groupTitle.includes("本人未認証枠");
+                const isVerified = groupTitle.includes("【本人認証済み枠】") || groupTitle.includes("本人認証済み枠");
+                const frameName = isUnverified ? "本人未認証枠 (Chưa xác minh)" : (isVerified ? "本人認証済み枠 (Đã xác minh)" : "Khung khác");
 
                 const grpStatus = String(grp.applicationStatus || grp.status || "");
                 const applicationItems = grp.applicationItems || grp.itemPrizeList || [];
-                const isAlreadyApplied = grpStatus === "40" || applicationItems.some(it => it.applicationSelectedFlg === "1");
+                const isSelected = grpStatus === "40" || applicationItems.some(it => it.applicationSelectedFlg === "1");
 
                 const timeRange = `${formatJstDate(grp.applicationStartDatetime)} ~ ${formatJstDate(grp.applicationEndDatetime)}`;
                 const itemDetails = applicationItems.map(it => {
@@ -799,57 +801,120 @@
                     return `${it.itemPrizeName || ""}${price}`;
                 }).join(", ");
 
-                const info = {
+                const itemObj = {
                     title: groupTitle,
                     items: itemDetails,
                     timeRange: timeRange,
-                    isApplied: isAlreadyApplied,
-                    frame: isUnverifiedFrame ? "本人未認証枠" : (isVerifiedFrame ? "本人認証済み枠" : "Khung khác")
+                    frame: frameName,
+                    isUnverified: isUnverified,
+                    isVerified: isVerified,
+                    status: grpStatus,
+                    isSelected: isSelected
                 };
 
-                // Trạng thái đang diễn ra chuusen trên web ("30" = đang mở, "40" = đã nộp đơn)
+                // Đang mở nhận đơn trên website ("30" = chưa nộp, "40" = đã nộp)
                 if (grpStatus === "30" || grpStatus === "40") {
-                    activeChuusenList.push(info);
+                    if (isUnverified) {
+                        unverifiedTotal++;
+                        if (isSelected) unverifiedApplied++;
+                    } else if (isVerified) {
+                        verifiedTotal++;
+                        if (isSelected) verifiedApplied++;
+                    }
+
+                    if (isSelected) {
+                        alreadyAppliedList.push(itemObj);
+                    } else {
+                        needApplyList.push(itemObj);
+                    }
                 } else if (grpStatus === "20") {
-                    upcomingList.push(info);
+                    upcomingList.push(itemObj);
                 } else if (grpStatus === "50") {
-                    endedCount++;
+                    endedList.push(itemObj);
                 }
             }
 
-            const unappliedCount = activeChuusenList.filter(it => !it.isApplied).length;
-            const appliedCount = activeChuusenList.filter(it => it.isApplied).length;
-
-            if (activeChuusenList.length > 0) {
-                addLog(`🎯 CÁC GIẢI ĐANG MỞ CHUUSEN TRÊN WEB (Tổng: ${activeChuusenList.length} giải):`, "success");
-                activeChuusenList.forEach((item, idx) => {
-                    addLog(`  📦 [${idx + 1}] ${item.title}`, "info");
-                    if (item.items) addLog(`     💰 Giá: ${item.items}`, "info");
-                    if (item.timeRange) addLog(`     ⏰ Hạn nộp: ${item.timeRange}`, "info");
-                    if (item.isApplied) {
-                        addLog(`     👉 Trạng thái nick này: ✅ ĐÃ NỘP ĐƠN THÀNH CÔNG (受付完了)`, "success");
-                    } else {
-                        addLog(`     👉 Trạng thái nick này: 🟢 CHƯA NỘP - SẴN SÀNG NỘP NGAY (受付中)`, "warn");
-                    }
+            // 1. CÁC GIẢI ĐANG MỞ CHƯA NỘP (CẦN CHỊU / CẦN NỘP)
+            if (needApplyList.length > 0) {
+                addLog(`🟢 1. CÁC GIẢI ĐANG MỞ CHỜ NỘP ĐƠN (CHƯA CHỊU - ${needApplyList.length} giải):`, "warn");
+                needApplyList.forEach((it, idx) => {
+                    addLog(`  👉 [${idx + 1}] ${it.title}`, "warn");
+                    if (it.items) addLog(`     📦 Tên SP & Giá: ${it.items}`, "info");
+                    addLog(`     🏷️ Phân loại khung: ${it.frame}`, "info");
+                    addLog(`     ⏰ Hạn chót nộp đơn: ${it.timeRange}`, "info");
+                    addLog(`     📌 Kết quả / Trạng thái: ⏳ CHƯA NỘP (Sẵn sàng nộp đơn)`, "warn");
                 });
             } else {
-                addLog(`🟡 Không có giải nào thuộc bộ lọc đang mở bốc thăm.`, "warn");
+                addLog(`🟢 1. CÁC GIẢI ĐANG MỞ CHỜ NỘP ĐƠN: 0 giải (Không có giải nào đang mở mà chưa nộp)`, "info");
             }
 
-            if (upcomingList.length > 0) {
-                addLog(`⏳ SẮP MỞ ĐỢT CHUUSEN (受付前 - ${upcomingList.length} giải):`, "info");
-                upcomingList.forEach((item, idx) => {
-                    addLog(`  ⏱ [${idx + 1}] ${item.title} (${item.timeRange})`, "info");
+            // 2. CÁC GIẢI ĐANG MỞ MÀ ĐÃ NỘP RỒI (ĐANG CHO PHÉP CHỊU MÀ ĐÃ CHỊU RỒI)
+            if (alreadyAppliedList.length > 0) {
+                addLog(`--------------------------------------------------`, "info");
+                addLog(`🔵 2. CÁC GIẢI ĐANG CHO PHÉP CHỊU MÀ BẠN ĐÃ CHỊU RỒI (${alreadyAppliedList.length} giải):`, "success");
+                alreadyAppliedList.forEach((it, idx) => {
+                    addLog(`  ✔ [${idx + 1}] ${it.title}`, "success");
+                    if (it.items) addLog(`     📦 Tên SP & Giá: ${it.items}`, "info");
+                    addLog(`     🏷️ Phân loại khung: ${it.frame}`, "info");
+                    addLog(`     ⏰ Hạn chót nộp đơn: ${it.timeRange}`, "info");
+                    addLog(`     📌 Kết quả / Trạng thái: ✅ ĐÃ NỘP ĐƠN THÀNH CÔNG (受付完了)`, "success");
                 });
+            }
+
+            // 3. CÁC GIẢI SẮP MỞ
+            if (upcomingList.length > 0) {
+                addLog(`--------------------------------------------------`, "info");
+                addLog(`⏳ 3. CÁC GIẢI SẮP MỞ BỐC THĂM (受付前 - ${upcomingList.length} giải):`, "info");
+                upcomingList.forEach((it, idx) => {
+                    addLog(`  ⏱ [${idx + 1}] ${it.title}`, "info");
+                    if (it.items) addLog(`     📦 Sản phẩm: ${it.items}`, "info");
+                    addLog(`     ⏰ Ngày mở: ${it.timeRange}`, "info");
+                });
+            }
+
+            // 4. THỐNG KÊ CÁC GIẢI ĐÃ HẾT HẠN
+            addLog(`--------------------------------------------------`, "info");
+            addLog(`⚪ 4. THỐNG KÊ CÁC GIẢI ĐÃ HẾT HẠN (受付終了 - Tổng: ${endedList.length} giải):`, "info");
+            const sampleEnded = endedList.slice(0, 6);
+            sampleEnded.forEach((it) => {
+                const appliedTag = it.isSelected ? " [Đã từng nộp]" : " [Không nộp]";
+                addLog(`  • ${it.title}${appliedTag} (Hết hạn: ${it.timeRange})`, "info");
+            });
+            if (endedList.length > 6) {
+                addLog(`  ... và ${endedList.length - 6} giải cũ khác đã kết thúc trước đó.`, "info");
+            }
+
+            // 5. BẢNG TỔNG HỢP TOÀN TRANG
+            const totalActive = needApplyList.length + alreadyAppliedList.length;
+            addLog(`==================================================`, "info");
+            addLog(`📊 BẢNG TỔNG HỢP TOÀN TRANG:`, "info");
+            addLog(`• Tổng cộng: ${items.length} giải trên toàn hệ thống`, "info");
+            addLog(`• Đang mở chuusen: ${totalActive} giải (Chưa nộp: ${needApplyList.length} | Đã nộp: ${alreadyAppliedList.length})`, "info");
+            addLog(`   👉 [本人未認証枠] (Chưa xác minh): ${unverifiedTotal} giải đang mở (Bạn đã nộp: ${unverifiedApplied}/${unverifiedTotal})`, unverifiedApplied === unverifiedTotal ? "success" : "warn");
+            addLog(`   👉 [本人認証済み枠] (Đã xác minh): ${verifiedTotal} giải đang mở (Bạn đã nộp: ${verifiedApplied}/${verifiedTotal})`, "info");
+            addLog(`• Sắp mở đợt mới: ${upcomingList.length} giải`, "info");
+            addLog(`• Đã hết hạn (kết thúc): ${endedList.length} giải`, "info");
+            addLog(`==================================================`, "info");
+
+            // Cập nhật số đếm theo bộ lọc đang chọn
+            const filterMode = localStorage.getItem("pk_filter_mode") || "unverified_only";
+            let filterRemain = 0;
+            let filterDone = 0;
+            if (filterMode === "unverified_only") {
+                filterRemain = unverifiedTotal - unverifiedApplied;
+                filterDone = unverifiedApplied;
+            } else if (filterMode === "verified_only") {
+                filterRemain = verifiedTotal - verifiedApplied;
+                filterDone = verifiedApplied;
+            } else {
+                filterRemain = needApplyList.length;
+                filterDone = alreadyAppliedList.length;
             }
 
             const openSpan = document.getElementById("pk-open-count");
             const appliedSpan = document.getElementById("pk-applied-count");
-            if (openSpan) openSpan.textContent = unappliedCount;
-            if (appliedSpan) appliedSpan.textContent = appliedCount;
-
-            addLog(`📊 TỔNG KẾT: Có ${activeChuusenList.length} giải đang chuusen | Nick này đã nộp: ${appliedCount} giải | Còn cần nộp: ${unappliedCount} giải.`, "info");
-            addLog(`--------------------------------------------------`, "info");
+            if (openSpan) openSpan.textContent = filterRemain;
+            if (appliedSpan) appliedSpan.textContent = filterDone;
 
         } catch (err) {
             addLog(`Lỗi kiểm tra danh sách chuusen: ${err.message}`, "err");
@@ -1216,7 +1281,7 @@
 
                     <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
                         <button class="pk-btn-run" id="pk-btn-check-only" style="background: linear-gradient(135deg, #1e90ff, #0984e3); box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3);">
-                            🔍 KIỂM TRA ĐANG CHUUSEN GÌ
+                            🔍 KIỂM TRA TOÀN BỘ TRANG
                         </button>
                         <button class="pk-btn-run" id="pk-btn-execute">
                             🚀 QUÉT & NỘP ĐƠN NGAY
