@@ -237,11 +237,74 @@ def run_all_accounts():
     print("=" * 80 + "\n")
     log("Tất cả tài khoản đã được xử lý xong!", "SUCCESS")
 
+def setup_flow(acc_name):
+    profiles = load_profiles()
+    names = [p.get("name") for p in profiles]
+    if acc_name not in names:
+        profiles.append({"name": acc_name, "enabled": True, "proxy": ""})
+        save_profiles(profiles)
+        log(f"Đã thêm [{acc_name}] vào danh sách profiles.json.")
+    setup_account(acc_name)
+
+def interactive_menu():
+    while True:
+        print("\n" + "=" * 68)
+        print("     POKEMON CENTER ONLINE - QUẢN LÝ & CHẠY ĐA TÀI KHOẢN")
+        print("=" * 68)
+        print("  1. Thêm tài khoản mới & Đăng nhập lần đầu (Lưu session)")
+        print("  2. Chạy tự động tất cả các tài khoản (Run All)")
+        print("  3. Chạy 1 tài khoản cụ thể")
+        print("  4. Xem danh sách tài khoản hiện có")
+        print("  5. Thoát")
+        print("=" * 68)
+        
+        try:
+            choice = input(">> Nhập lựa chọn (1-5): ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\nĐã thoát.")
+            break
+
+        if choice == "1":
+            acc_name = input(">> Nhập tên định danh cho nick (VD: Nick1, Nick2): ").strip()
+            if acc_name:
+                setup_flow(acc_name)
+            else:
+                log("Tên không được để trống!", "WARN")
+        elif choice == "2":
+            run_all_accounts()
+        elif choice == "3":
+            profiles = load_profiles()
+            if not profiles:
+                log("Chưa có tài khoản nào trong hệ thống!", "WARN")
+                continue
+            print("\nChọn tài khoản cần chạy:")
+            for i, p in enumerate(profiles, 1):
+                print(f"  {i}. {p.get('name')}")
+            idx = input(f">> Nhập số thứ tự (1-{len(profiles)}): ").strip()
+            if idx.isdigit() and 1 <= int(idx) <= len(profiles):
+                target = profiles[int(idx) - 1]
+                with sync_playwright() as p:
+                    run_single_account(p, target)
+            else:
+                log("Lựa chọn không hợp lệ!", "WARN")
+        elif choice == "4":
+            profiles = load_profiles()
+            print(f"\nDanh sách tài khoản ({len(profiles)} nick):")
+            for i, p in enumerate(profiles, 1):
+                en = "BẬT" if p.get("enabled", True) else "TẮT"
+                px = p.get("proxy", "IP Gốc")
+                print(f"  {i}. [{p.get('name')}] - Trạng thái: {en} - Proxy: {px}")
+        elif choice == "5":
+            print("Tạm biệt!")
+            break
+        else:
+            print("Lựa chọn không hợp lệ, vui lòng chọn từ 1 đến 5.")
+
 def main():
     parser = argparse.ArgumentParser(description="Multi-Account Runner cho Pokemon Center Online")
-    parser.add_argument("--setup", type=str, help="Mở Chrome cho tài khoản chỉ định để đăng nhập lần đầu (VD: --setup Acc_01)")
-    parser.add_argument("--run-all", action="store_true", help="Chạy tuần tự tất cả tài khoản trong profiles.json")
-    parser.add_argument("--run", type=str, help="Chạy chỉ định 1 tài khoản (VD: --run Acc_01)")
+    parser.add_argument("--setup", type=str, nargs="?", const="", help="Mở Chrome để đăng nhập lần đầu (VD: --setup Nick_1)")
+    parser.add_argument("--run-all", action="store_true", help="Chạy tuần tự tất cả tài khoản")
+    parser.add_argument("--run", type=str, help="Chạy chỉ định 1 tài khoản (VD: --run Nick_1)")
     parser.add_argument("--list", action="store_true", help="Xem danh sách tài khoản hiện có")
     args = parser.parse_args()
 
@@ -255,15 +318,14 @@ def main():
         print()
         return
 
-    if args.setup:
-        # Nếu chưa có trong danh sách thì tự thêm vào
-        profiles = load_profiles()
-        names = [p.get("name") for p in profiles]
-        if args.setup not in names:
-            profiles.append({"name": args.setup, "enabled": True, "proxy": ""})
-            save_profiles(profiles)
-            log(f"Đã thêm [{args.setup}] vào file profiles.json.")
-        setup_account(args.setup)
+    if args.setup is not None:
+        acc_name = args.setup.strip()
+        if not acc_name:
+            acc_name = input(">> Nhập tên định danh cho nick (VD: Nick1, Nick2): ").strip()
+        if acc_name:
+            setup_flow(acc_name)
+        else:
+            log("Tên tài khoản không được để trống!", "WARN")
         return
 
     if args.run:
@@ -279,8 +341,8 @@ def main():
         run_all_accounts()
         return
 
-    # Nếu không truyền tham số, hiển thị hướng dẫn
-    parser.print_help()
+    # Mặc định mở Menu tương tác trực quan
+    interactive_menu()
 
 if __name__ == "__main__":
     main()

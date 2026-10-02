@@ -1,5 +1,5 @@
 @echo off
 chcp 65001 > nul
 cls
-python multi_runner.py --setup
+python multi_runner.py
 pause
