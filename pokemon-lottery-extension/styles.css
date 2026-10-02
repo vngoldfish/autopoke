@@ -448,3 +448,124 @@ input:checked + .pk-slider:before {
     border-color: #2ed573;
 }
 
+/* Product Selection Box */
+#pk-product-selection-box {
+    background: #14161d;
+    border: 1px solid #2f3542;
+    border-radius: 8px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+.pk-selection-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #282c37;
+}
+
+.pk-selection-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #2ed573;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+#pk-product-list-container {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.pk-item-check-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 10px;
+    background: #1e2029;
+    border: 1px solid #2f3542;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    user-select: none;
+}
+
+.pk-item-check-row:hover {
+    background: #252834;
+    border-color: #57606f;
+}
+
+.pk-item-check-row.selected {
+    background: #192720;
+    border-color: #2ed573;
+}
+
+.pk-item-check-row.applied {
+    background: #15171e;
+    border-color: #282c37;
+    opacity: 0.8;
+    cursor: default;
+}
+
+.pk-item-checkbox {
+    margin-top: 3px;
+    width: 16px;
+    height: 16px;
+    accent-color: #2ed573;
+    cursor: pointer;
+}
+
+.pk-item-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.pk-item-title {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: #f1f2f6;
+    line-height: 1.4;
+}
+
+.pk-item-meta {
+    font-size: 10.5px;
+    color: #a4b0be;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.pk-item-badge {
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.pk-item-badge.badge-open {
+    background: rgba(46, 213, 115, 0.2);
+    color: #2ed573;
+    border: 1px solid #2ed573;
+}
+
+.pk-item-badge.badge-applied {
+    background: rgba(112, 161, 255, 0.2);
+    color: #70a1ff;
+    border: 1px solid #70a1ff;
+}
+
+.pk-item-badge.badge-frame {
+    background: #2f3542;
+    color: #eccc68;
+}
+

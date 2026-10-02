@@ -7,7 +7,7 @@
     console.log("[PK-BOT] Page script initialized in MAIN world.");
 
     const CONFIG = {
-        autoRunOnLoad: true,        // Tự động nộp đơn khi vào apply.html
+        autoRunOnLoad: false,       // Mặc định tắt để người dùng tích chọn sản phẩm trước
         autoLoginOnLoad: false,     // Tự động đăng nhập khi vào /login/
         monitorIntervalMin: 10,     // Chu kỳ tự động kiểm tra lại (phút)
     };
@@ -923,11 +923,223 @@
         }
     }
 
+    // =========================================================================
+    // TẢI & HIỂN THỊ DANH SÁCH SẢN PHẨM CÓ CHECKBOX ĐỂ CHỌN
+    // =========================================================================
+
+    let CURRENT_SCANNED_ITEMS = [];
+
+    async function loadAndRenderProducts() {
+        const listContainer = document.getElementById("pk-product-list-container");
+        if (!listContainer) return;
+
+        try {
+            const gigyaReady = await waitForGigya();
+            if (!gigyaReady) {
+                listContainer.innerHTML = `<div style="color: #ff4757; padding: 8px; font-size: 11px;">Chưa kết nối được Gigya Auth. Hãy đợi trang tải xong.</div>`;
+                return;
+            }
+
+            let jwtData;
+            try {
+                jwtData = await getJwtToken();
+            } catch (e) {
+                listContainer.innerHTML = `<div style="color: #ffa502; padding: 8px; font-size: 11px;">Chưa đăng nhập. Hãy đăng nhập tài khoản trước.</div>`;
+                return;
+            }
+
+            const jwt = jwtData.token;
+            try {
+                const payload = JSON.parse(atob(jwt.split(".")[1]));
+                const emailSpan = document.getElementById("pk-user-email");
+                if (emailSpan && payload.email) {
+                    emailSpan.textContent = payload.email;
+                }
+            } catch (e) {}
+
+            const listUrl = (window.ajaxUrl && window.ajaxUrl.getLotteryListUrl) ?
+                window.ajaxUrl.getLotteryListUrl : "/a/ltr/api/lottery/v1/get-lottery-list";
+
+            const listRes = await fetch(listUrl, {
+                method: "GET",
+                credentials: "include",
+                headers: {
+                    "Authorization": "Bearer " + jwt,
+                    "x-requested-with": "XMLHttpRequest"
+                }
+            });
+
+            if (!listRes.ok) {
+                listContainer.innerHTML = `<div style="color: #ff4757; padding: 8px; font-size: 11px;">Lỗi tải dữ liệu: HTTP ${listRes.status}</div>`;
+                return;
+            }
+
+            const json = await listRes.json();
+            CURRENT_SCANNED_ITEMS = json.data || [];
+            renderProductChecklist();
+
+        } catch (err) {
+            if (listContainer) {
+                listContainer.innerHTML = `<div style="color: #ff4757; padding: 8px; font-size: 11px;">Lỗi quét sản phẩm: ${err.message}</div>`;
+            }
+        }
+    }
+
+    function renderProductChecklist() {
+        const listContainer = document.getElementById("pk-product-list-container");
+        if (!listContainer) return;
+
+        const filterMode = localStorage.getItem("pk_filter_mode") || "unverified_only";
+        const items = CURRENT_SCANNED_ITEMS;
+
+        const activeGroups = [];
+        let totalAppliedInFilter = 0;
+        let totalOpenInFilter = 0;
+
+        for (const grp of items) {
+            const groupTitle = grp.lotteryTitle || grp.lotteryGroupTitle || "Không rõ tên";
+            const isUnverified = groupTitle.includes("【本人未認証枠】") || groupTitle.includes("本人未認証枠");
+            const isVerified = groupTitle.includes("【本人認証済み枠】") || groupTitle.includes("本人認証済み枠");
+
+            if (filterMode === "unverified_only" && !isUnverified) continue;
+            if (filterMode === "verified_only" && !isVerified) continue;
+
+            const grpStatus = String(grp.applicationStatus || grp.status || "");
+            const applicationItems = grp.applicationItems || grp.itemPrizeList || [];
+            const isApplied = grpStatus === "40" || applicationItems.some(it => it.applicationSelectedFlg === "1");
+
+            // Chỉ hiển thị các đợt đang mở nhận đơn ("30" hoặc "40")
+            if (grpStatus === "30" || grpStatus === "40") {
+                if (isApplied) totalAppliedInFilter++;
+                else totalOpenInFilter++;
+
+                activeGroups.push({
+                    groupId: grp.lotteryGroupId,
+                    title: groupTitle,
+                    isApplied: isApplied,
+                    frame: isUnverified ? "本人未認証枠" : (isVerified ? "本人認証済み枠" : "Khung chung"),
+                    items: applicationItems,
+                    endDate: formatJstDate(grp.applicationEndDatetime)
+                });
+            }
+        }
+
+        const openSpan = document.getElementById("pk-open-count");
+        const appliedSpan = document.getElementById("pk-applied-count");
+        if (openSpan) openSpan.textContent = totalOpenInFilter;
+        if (appliedSpan) appliedSpan.textContent = totalAppliedInFilter;
+
+        if (activeGroups.length === 0) {
+            listContainer.innerHTML = `
+                <div style="text-align: center; color: #ffa502; padding: 12px 6px; font-size: 11.5px;">
+                    Không có sản phẩm nào thuộc bộ lọc đang mở nhận đơn.<br>
+                    <span style="font-size: 10.5px; color: #a4b0be;">(Hãy thử đổi sang "Tất cả các khung" ở trên)</span>
+                </div>
+            `;
+            updateExecuteButtonCount();
+            return;
+        }
+
+        let html = "";
+        for (const grp of activeGroups) {
+            for (const it of grp.items) {
+                const prizeId = it.itemPrizeId || it.prizeId;
+                const prizeName = it.itemPrizeName || grp.title;
+                const priceStr = it.price ? `${Number(it.price).toLocaleString()}円` : "";
+                const isItemApplied = grp.isApplied || it.applicationSelectedFlg === "1";
+
+                if (isItemApplied) {
+                    html += `
+                        <div class="pk-item-check-row applied">
+                            <span class="pk-item-badge badge-applied">✅ Đã nộp</span>
+                            <div class="pk-item-info">
+                                <div class="pk-item-title">${prizeName}</div>
+                                <div class="pk-item-meta">
+                                    <span class="pk-item-badge badge-frame">${grp.frame}</span>
+                                    ${priceStr ? `<span>💰 ${priceStr}</span>` : ""}
+                                    <span>⏰ Hạn: ${grp.endDate}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <label class="pk-item-check-row selected" id="row-${grp.groupId}-${prizeId}">
+                            <input type="checkbox" class="pk-item-checkbox" 
+                                value="${prizeId}" 
+                                data-group="${grp.groupId}" 
+                                data-title="${grp.title} - ${prizeName}" 
+                                data-frame="${grp.frame}"
+                                checked>
+                            <div class="pk-item-info">
+                                <div class="pk-item-title">${prizeName}</div>
+                                <div class="pk-item-meta">
+                                    <span class="pk-item-badge badge-open">🟢 Đang mở</span>
+                                    <span class="pk-item-badge badge-frame">${grp.frame}</span>
+                                    ${priceStr ? `<span>💰 ${priceStr}</span>` : ""}
+                                    <span>⏰ Hạn: ${grp.endDate}</span>
+                                </div>
+                            </div>
+                        </label>
+                    `;
+                }
+            }
+        }
+
+        listContainer.innerHTML = html;
+
+        listContainer.querySelectorAll(".pk-item-checkbox").forEach(chk => {
+            chk.addEventListener("change", (e) => {
+                const row = e.target.closest(".pk-item-check-row");
+                if (row) {
+                    if (e.target.checked) row.classList.add("selected");
+                    else row.classList.remove("selected");
+                }
+                updateExecuteButtonCount();
+            });
+        });
+
+        updateExecuteButtonCount();
+    }
+
+    function updateExecuteButtonCount() {
+        const runBtn = document.getElementById("pk-btn-execute");
+        if (!runBtn) return;
+
+        const checkedBoxes = document.querySelectorAll(".pk-item-checkbox:checked");
+        const count = checkedBoxes.length;
+
+        if (count > 0) {
+            runBtn.disabled = false;
+            runBtn.innerHTML = `🚀 NỘP ĐƠN CHO ${count} SẢN PHẨM ĐÃ CHỌN`;
+            runBtn.style.background = "linear-gradient(135deg, #2ed573, #10ac84)";
+            runBtn.style.cursor = "pointer";
+        } else {
+            runBtn.disabled = true;
+            runBtn.innerHTML = `🚀 CHƯA CHỌN SẢN PHẨM NÀO`;
+            runBtn.style.background = "#57606f";
+            runBtn.style.cursor = "not-allowed";
+        }
+    }
+
     async function runBotProcess() {
+        const checkedBoxes = Array.from(document.querySelectorAll(".pk-item-checkbox:checked"));
+        if (checkedBoxes.length === 0) {
+            addLog("⚠️ Bạn chưa tích chọn sản phẩm nào để nộp đơn!", "warn");
+            addLog("👉 Hãy tích vào ô vuông trước sản phẩm bạn muốn bốc thăm ở danh sách phía trên.", "info");
+            return;
+        }
+
         const runBtn = document.getElementById("pk-btn-execute");
         if (runBtn) runBtn.disabled = true;
 
-        addLog("Bắt đầu quy trình kiểm tra và đăng ký xổ số...", "info");
+        const toApplyList = checkedBoxes.map(chk => ({
+            groupId: chk.dataset.group,
+            prizeId: chk.value,
+            title: chk.dataset.title || "Sản phẩm"
+        }));
+
+        addLog(`Bắt đầu quy trình nộp đơn cho ${toApplyList.length} sản phẩm bạn đã chọn...`, "info");
 
         try {
             const gigyaReady = await waitForGigya();
@@ -951,114 +1163,7 @@
             const jwt = jwtData.token;
             addLog("Đã lấy Bearer Token thành công.", "success");
 
-            try {
-                const payload = JSON.parse(atob(jwt.split(".")[1]));
-                const emailSpan = document.getElementById("pk-user-email");
-                if (emailSpan && payload.email) {
-                    emailSpan.textContent = payload.email;
-                }
-            } catch (e) {}
-
-            addLog("Đang tải danh sách các sản phẩm xổ số...", "info");
-            const listUrl = (window.ajaxUrl && window.ajaxUrl.getLotteryListUrl) ?
-                window.ajaxUrl.getLotteryListUrl : "/a/ltr/api/lottery/v1/get-lottery-list";
-
-            const listRes = await fetch(listUrl, {
-                method: "GET",
-                credentials: "include",
-                headers: {
-                    "Authorization": "Bearer " + jwt,
-                    "x-requested-with": "XMLHttpRequest"
-                }
-            });
-
-            if (!listRes.ok) {
-                addLog(`Lỗi tải danh sách: HTTP ${listRes.status}`, "err");
-                if (runBtn) runBtn.disabled = false;
-                return;
-            }
-
-            const json = await listRes.json();
-            const items = json.data || [];
-            addLog(`Hệ thống tìm thấy ${items.length} bộ sản phẩm bốc thăm.`, "info");
-
-            const toApplyList = [];
-            let appliedCount = 0;
-            const alreadyAppliedList = [];
-            let endedCount = 0;
-            let notStartedCount = 0;
-
-            const filterMode = localStorage.getItem("pk_filter_mode") || "unverified_only";
-            addLog(`Bộ lọc đang chọn: ${filterMode === "unverified_only" ? "Chỉ [本人未認証枠]" : (filterMode === "verified_only" ? "Chỉ [本人認証済み枠]" : "Tất cả các khung")}`, "info");
-
-            for (const grp of items) {
-                const groupTitle = grp.lotteryTitle || grp.lotteryGroupTitle || "Không rõ tên";
-                const isUnverifiedFrame = groupTitle.includes("【本人未認証枠】") || groupTitle.includes("本人未認証枠");
-                const isVerifiedFrame = groupTitle.includes("【本人認証済み枠】") || groupTitle.includes("本人認証済み枠");
-
-                if (filterMode === "unverified_only" && !isUnverifiedFrame) {
-                    continue;
-                } else if (filterMode === "verified_only" && !isVerifiedFrame) {
-                    continue;
-                }
-
-                // Trạng thái theo API Pokémon Center:
-                // "20": 受付前 (chưa mở)
-                // "30": 受付中 (đang mở đăng ký)
-                // "40": 受付完了 (đã nộp đơn thành công trước đó)
-                // "50": 受付終了 (đã hết hạn)
-                const grpStatus = String(grp.applicationStatus || grp.status || "");
-                const applicationItems = grp.applicationItems || grp.itemPrizeList || [];
-
-                // Kiểm tra xem nhóm sản phẩm này đã được nộp chưa
-                const isAlreadyApplied = grpStatus === "40" || applicationItems.some(it => it.applicationSelectedFlg === "1");
-
-                if (isAlreadyApplied) {
-                    appliedCount++;
-                    alreadyAppliedList.push(groupTitle);
-                    addLog(`[Đã nộp trước đó]: ${groupTitle}`, "info");
-                } else if (grpStatus === "30") {
-                    // Đang mở và chưa nộp
-                    for (const item of applicationItems) {
-                        const prizeId = item.itemPrizeId || item.prizeId;
-                        const prizeName = item.itemPrizeName || "";
-                        const fullTitle = `${groupTitle}${prizeName ? ' - ' + prizeName : ''}`;
-                        toApplyList.push({
-                            groupId: grp.lotteryGroupId,
-                            prizeId: prizeId,
-                            title: fullTitle
-                        });
-                        addLog(`[Sẵn sàng nộp]: ${fullTitle}`, "info");
-                    }
-                } else if (grpStatus === "20") {
-                    notStartedCount++;
-                } else if (grpStatus === "50") {
-                    endedCount++;
-                }
-            }
-
-            const openSpan = document.getElementById("pk-open-count");
-            const appliedSpan = document.getElementById("pk-applied-count");
-            if (openSpan) openSpan.textContent = toApplyList.length;
-            if (appliedSpan) appliedSpan.textContent = appliedCount;
-
-            if (toApplyList.length === 0) {
-                if (appliedCount > 0) {
-                    addLog(`Tài khoản này ĐÃ ĐĂNG KÝ XONG ${appliedCount} giải phù hợp trước đó! Không còn giải nào chưa nộp. Hoàn thành!`, "success");
-                    if (alreadyAppliedList.length > 0) {
-                        addLog(`📋 DANH SÁCH GIẢI ĐÃ NỘP TRƯỚC ĐÓ:`, "info");
-                        alreadyAppliedList.forEach((name, idx) => {
-                            addLog(`  ✔ [${idx + 1}] ${name}`, "info");
-                        });
-                    }
-                } else {
-                    addLog(`Không tìm thấy sản phẩm nào đang mở nhận đơn (受付中) phù hợp với bộ lọc. Hoàn thành!`, "warn");
-                }
-                if (runBtn) runBtn.disabled = false;
-                return;
-            }
-
-            addLog(`Đang bắt đầu nộp đơn cho ${toApplyList.length} sản phẩm hợp lệ...`, "info");
+            addLog(`Đang gửi đơn đăng ký cho ${toApplyList.length} sản phẩm...`, "info");
             const applyUrl = (window.ajaxUrl && window.ajaxUrl.applyLotteryUrl) ?
                 window.ajaxUrl.applyLotteryUrl : "/a/ltr/api/lottery/v1/apply-lottery";
 
@@ -1112,29 +1217,18 @@
                 await new Promise(r => setTimeout(r, 1500));
             }
 
-            // Cập nhật số đếm trên giao diện ngay lập tức
-            const finalApplied = appliedCount + successCount;
-            const finalRemain = Math.max(0, toApplyList.length - successCount);
-            if (openSpan) openSpan.textContent = finalRemain;
-            if (appliedSpan) appliedSpan.textContent = finalApplied;
-
             addLog(`--------------------------------------------------`, "info");
-            addLog(`🎉 HOÀN THÀNH: Đã đăng ký thành công ${successCount}/${toApplyList.length} giải vừa nộp!`, "success");
+            addLog(`🎉 HOÀN THÀNH: Đã đăng ký thành công ${successCount}/${toApplyList.length} giải bạn đã chọn!`, "success");
 
             if (justAppliedList.length > 0) {
-                addLog(`📋 KẾT QUẢ VỪA NỘP THÀNH CÔNG (${justAppliedList.length} giải):`, "success");
+                addLog(`📋 KẾT QUẢ VỪA NỘP THÀNH CÔNG:`, "success");
                 justAppliedList.forEach((name, idx) => {
                     addLog(`  ✅ [${idx + 1}] ${name}`, "success");
                 });
             }
 
-            if (alreadyAppliedList.length > 0) {
-                addLog(`ℹ️ CÁC GIẢI ĐÃ NỘP TRƯỚC ĐÓ (${alreadyAppliedList.length} giải):`, "info");
-                alreadyAppliedList.forEach((name, idx) => {
-                    addLog(`  ✔ [${idx + 1}] ${name}`, "info");
-                });
-            }
-            addLog(`✨ Đã nộp xong toàn bộ. Không tải lại trang để bạn kiểm tra kết quả!`, "success");
+            // Tự động tải lại danh sách checklist để hiển thị badge 'Đã nộp'
+            await loadAndRenderProducts();
 
         } catch (err) {
             addLog(`Lỗi xử lý: ${err.message}`, "err");
@@ -1279,12 +1373,28 @@
                         </div>
                     </div>
 
+                    <!-- KHỐI CHỌN SẢN PHẨM CẦN NỘP -->
+                    <div id="pk-product-selection-box">
+                        <div class="pk-selection-header">
+                            <span class="pk-selection-title">📦 CHỌN SẢN PHẨM CẦN NỘP:</span>
+                            <div style="display: flex; gap: 4px;">
+                                <button type="button" id="pk-btn-select-all" class="pk-logs-btn">Chọn hết</button>
+                                <button type="button" id="pk-btn-deselect-all" class="pk-logs-btn">Bỏ chọn</button>
+                            </div>
+                        </div>
+                        <div id="pk-product-list-container">
+                            <div style="text-align: center; color: #a4b0be; padding: 12px; font-size: 11px;">
+                                ⏳ Đang quét danh sách sản phẩm...
+                            </div>
+                        </div>
+                    </div>
+
                     <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
-                        <button class="pk-btn-run" id="pk-btn-check-only" style="background: linear-gradient(135deg, #1e90ff, #0984e3); box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3);">
-                            🔍 KIỂM TRA TOÀN BỘ TRANG
+                        <button class="pk-btn-run" id="pk-btn-execute" style="background: linear-gradient(135deg, #2ed573, #10ac84);">
+                            🚀 NỘP ĐƠN CHO CÁC SẢN PHẨM ĐÃ CHỌN
                         </button>
-                        <button class="pk-btn-run" id="pk-btn-execute">
-                            🚀 QUÉT & NỘP ĐƠN NGAY
+                        <button class="pk-btn-run" id="pk-btn-check-only" style="background: linear-gradient(135deg, #1e90ff, #0984e3); box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3); font-size: 12px; padding: 8px;">
+                            🔍 KIỂM TRA TOÀN BỘ TRANG (CHI TIẾT)
                         </button>
                     </div>
                     <div style="margin-top: 4px;">
@@ -1431,7 +1541,36 @@
             filterSelect.addEventListener("change", (e) => {
                 localStorage.setItem("pk_filter_mode", e.target.value);
                 addLog(`Đã đổi bộ lọc: ${e.target.options[e.target.selectedIndex].text}`, "info");
-                checkActiveLotteryList();
+                if (CURRENT_SCANNED_ITEMS && CURRENT_SCANNED_ITEMS.length > 0) {
+                    renderProductChecklist();
+                } else {
+                    loadAndRenderProducts();
+                }
+            });
+        }
+
+        // Nút Chọn hết / Bỏ chọn sản phẩm
+        const selectAllBtn = document.getElementById("pk-btn-select-all");
+        if (selectAllBtn) {
+            selectAllBtn.addEventListener("click", () => {
+                document.querySelectorAll(".pk-item-checkbox").forEach(chk => {
+                    chk.checked = true;
+                    const row = chk.closest(".pk-item-check-row");
+                    if (row) row.classList.add("selected");
+                });
+                updateExecuteButtonCount();
+            });
+        }
+
+        const deselectAllBtn = document.getElementById("pk-btn-deselect-all");
+        if (deselectAllBtn) {
+            deselectAllBtn.addEventListener("click", () => {
+                document.querySelectorAll(".pk-item-checkbox").forEach(chk => {
+                    chk.checked = false;
+                    const row = chk.closest(".pk-item-check-row");
+                    if (row) row.classList.remove("selected");
+                });
+                updateExecuteButtonCount();
             });
         }
 
@@ -1486,16 +1625,19 @@
         }
         // 3. Nếu đang ở trang nộp đơn xổ số
         else if (path.includes("lottery/apply.html")) {
+            // Tải và hiển thị danh sách sản phẩm có checkbox để chọn ngay khi mở trang
+            loadAndRenderProducts();
+
             const savedPref = localStorage.getItem("pk_auto_run");
-            const shouldAutoRun = (savedPref === null) ? true : (savedPref === "1");
+            const shouldAutoRun = (savedPref === "1"); // Mặc định tắt để người dùng tích chọn trước
 
             if (shouldAutoRun) {
-                addLog("Chế độ tự động đang BẬT. Bot sẽ bắt đầu chạy sau 2.5 giây...", "info");
+                addLog("Chế độ tự động đang BẬT. Bot sẽ tự nộp cho các mục đã chọn sau 3 giây...", "info");
                 setTimeout(() => {
                     runBotProcess();
-                }, 2500);
+                }, 3000);
             } else {
-                addLog("Chế độ tự động đang TẮT. Bạn có thể bấm nút màu xanh để chạy bất cứ lúc nào.", "info");
+                addLog("✨ Đã tải danh sách. Hãy tích chọn sản phẩm bạn muốn nộp đơn rồi bấm nút Nộp đơn.", "info");
             }
         }
     }
