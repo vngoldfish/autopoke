@@ -29,7 +29,10 @@
     function createWidget() {
         if (document.getElementById("pk-auto-bot-container")) return;
 
-        const isLoginPage = window.location.pathname.includes("login");
+        const path = window.location.pathname.toLowerCase();
+        const isMfaPage = path.includes("mfa") || path.includes("passcode");
+        const isLoginPage = (path.includes("login") || path.endsWith("/login/")) && !isMfaPage;
+
         const container = document.createElement("div");
         container.id = "pk-auto-bot-container";
 
@@ -43,11 +46,25 @@
                 </div>
             </div>
             <div id="pk-bot-body">
-                ${isLoginPage ? `
+                ${isMfaPage ? `
                     <div class="pk-status-box">
-                        <div style="color: #ffa502; font-weight: bold; margin-bottom: 6px;">⚠️ Bạn đang ở trang đăng nhập</div>
-                        <div>Vui lòng đăng nhập tài khoản. Ngay sau khi đăng nhập thành công, bot sẽ tự động quét và đăng ký bốc thăm cho bạn!</div>
+                        <div style="color: #2ed573; font-weight: bold; margin-bottom: 6px;">📩 BƯỚC NHẬP MÃ OTP GMAIL</div>
+                        <div style="font-size: 11px; line-height: 1.4;">Pokémon Center đã gửi mã OTP về Gmail. Bấm nút bên dưới để bot tự động đọc và điền mã OTP!</div>
                     </div>
+                    <button class="pk-btn-run" id="pk-btn-fetch-otp" style="background: linear-gradient(135deg, #ff4757, #ee1515);">
+                        📩 ĐỌC OTP GMAIL & TỰ ĐIỀN
+                    </button>
+                    <div style="display: flex; gap: 6px; margin-top: 4px;">
+                        <input type="text" id="pk-manual-otp" placeholder="Hoặc dán 6 số OTP vào đây" style="flex: 1; padding: 6px 8px; border-radius: 6px; border: 1px solid #57606f; background: #2f3542; color: #fff; font-size: 12px; outline: none;">
+                        <button id="pk-btn-fill-otp" style="padding: 6px 12px; background: #2ed573; border: none; border-radius: 6px; color: #fff; font-weight: bold; cursor: pointer; font-size: 12px;">Điền</button>
+                    </div>
+                    <div id="pk-bot-logs"></div>
+                ` : isLoginPage ? `
+                    <div class="pk-status-box">
+                        <div style="color: #ffa502; font-weight: bold; margin-bottom: 6px;">🔑 TRANG ĐĂNG NHẬP</div>
+                        <div style="font-size: 11px; line-height: 1.4;">Vui lòng đăng nhập tài khoản. Ngay sau khi bấm đăng nhập, bot sẽ tự động đọc mã OTP từ Gmail ở bước tiếp theo!</div>
+                    </div>
+                    <div id="pk-bot-logs"></div>
                 ` : `
                     <div class="pk-row">
                         <span class="pk-switch-label">Tự động nộp khi mở trang:</span>
@@ -98,6 +115,25 @@
             });
         }
 
+        // Xử lý trang MFA OTP
+        const btnFetchOtp = document.getElementById("pk-btn-fetch-otp");
+        if (btnFetchOtp) {
+            btnFetchOtp.addEventListener("click", () => {
+                fetchOtpFromLocalServer();
+            });
+        }
+        const btnFillManual = document.getElementById("pk-btn-fill-otp");
+        if (btnFillManual) {
+            btnFillManual.addEventListener("click", () => {
+                const manualCode = document.getElementById("pk-manual-otp").value.trim();
+                if (manualCode) {
+                    fillAndSubmitOtp(manualCode);
+                } else {
+                    addLog("Vui lòng nhập mã OTP 6 số!", "warn");
+                }
+            });
+        }
+
         // Checkbox tự động
         const autoToggle = document.getElementById("pk-auto-toggle");
         if (autoToggle) {
@@ -130,6 +166,73 @@
             runBtn.addEventListener("click", () => {
                 runBotProcess();
             });
+        }
+    }
+
+    // Điền và xác thực mã OTP
+    function fillAndSubmitOtp(code) {
+        if (!code) return;
+        addLog(`Đang điền mã OTP [${code}] vào ô Passcode...`, "info");
+        const selectors = [
+            'input[name="passcode"]',
+            'input[name="code"]',
+            '#passcode',
+            'input[type="text"]',
+            'input[type="number"]'
+        ];
+        let filled = false;
+        for (const sel of selectors) {
+            const el = document.querySelector(sel);
+            if (el) {
+                el.value = code;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                filled = true;
+                break;
+            }
+        }
+        if (filled) {
+            addLog("Đã điền xong mã OTP. Đang tự động bấm nút Xác thực...", "success");
+            setTimeout(() => {
+                const btnSelectors = ['button[type="submit"]', '#authBtn', '#verifyBtn', 'input[type="submit"]', 'button', 'a'];
+                for (const bSel of btnSelectors) {
+                    const btns = Array.from(document.querySelectorAll(bSel));
+                    const targetBtn = btns.find(b => b.textContent && (b.textContent.includes("認証") || b.textContent.includes("送信") || b.textContent.includes("次へ")));
+                    if (targetBtn) {
+                        targetBtn.click();
+                        addLog("Đã bấm nút xác thực! Đang chờ chuyển hướng...", "success");
+                        return;
+                    }
+                }
+            }, 1000);
+        } else {
+            addLog("Không tìm thấy ô nhập Passcode trên trang!", "err");
+        }
+    }
+
+    // Kết nối tới OTP Server cục bộ (127.0.0.1:8765) để lấy mã từ Gmail
+    async function fetchOtpFromLocalServer() {
+        addLog("Đang kết nối tới OTP Server (127.0.0.1:8765) để đọc Gmail...", "info");
+        try {
+            const res = await fetch("http://127.0.0.1:8765/get-otp");
+            if (!res.ok) {
+                let errText = res.statusText;
+                try {
+                    const errJson = await res.json();
+                    errText = errJson.error || errText;
+                } catch(e) {}
+                addLog(`Lỗi từ OTP Server: ${errText}`, "err");
+                return;
+            }
+            const data = await res.json();
+            if (data.success && data.otp) {
+                addLog(`-> TÌM THẤY MÃ OTP: ${data.otp}!`, "success");
+                fillAndSubmitOtp(data.otp);
+            } else {
+                addLog(`Chưa nhận được OTP: ${data.error || 'Thử lại sau ít giây'}`, "warn");
+            }
+        } catch(e) {
+            addLog("Không thể kết nối tới OTP Server! Hãy bấm đúp chạy file 'chay_otp_server.bat'.", "err");
         }
     }
 
@@ -341,7 +444,8 @@
         createWidget();
 
         // Nếu đang ở trang apply.html và được bật tự động
-        if (window.location.pathname.includes("lottery/apply.html")) {
+        const path = window.location.pathname.toLowerCase();
+        if (path.includes("lottery/apply.html")) {
             const savedPref = localStorage.getItem("pk_auto_run");
             const shouldAutoRun = (savedPref === null) ? true : (savedPref === "1");
 
@@ -353,6 +457,11 @@
             } else {
                 addLog("Chế độ tự động đang TẮT. Bạn có thể bấm nút màu xanh để chạy bất cứ lúc nào.", "info");
             }
+        } else if (path.includes("mfa") || path.includes("passcode")) {
+            addLog("Đang ở trang xác thực OTP. Đang thử kết nối Gmail lấy mã sau 3 giây...", "info");
+            setTimeout(() => {
+                fetchOtpFromLocalServer();
+            }, 3000);
         }
     }
 

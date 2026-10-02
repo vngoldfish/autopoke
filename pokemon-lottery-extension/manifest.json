@@ -14,12 +14,16 @@
     "storage"
   ],
   "host_permissions": [
-    "https://www.pokemoncenter-online.com/*"
+    "https://www.pokemoncenter-online.com/*",
+    "https://id.pokemoncenter-online.com/*",
+    "http://127.0.0.1:8765/*",
+    "http://localhost:8765/*"
   ],
   "content_scripts": [
     {
       "matches": [
-        "https://www.pokemoncenter-online.com/lottery/*"
+        "https://www.pokemoncenter-online.com/*",
+        "https://id.pokemoncenter-online.com/*"
       ],
       "js": [
         "content.js"
@@ -31,7 +35,8 @@
     },
     {
       "matches": [
-        "https://www.pokemoncenter-online.com/lottery/*"
+        "https://www.pokemoncenter-online.com/*",
+        "https://id.pokemoncenter-online.com/*"
       ],
       "js": [
         "page_script.js"
