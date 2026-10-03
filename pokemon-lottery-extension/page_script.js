@@ -697,33 +697,41 @@
             } catch (e) {}
         }
 
-        // Nghỉ tự nhiên trước khi thông báo
-        await new Promise(r => setTimeout(r, gaussianRandom(500, 120)));
-
-        addLog(``, "info");
-        addLog(`✅ Hoàn tất! Bây giờ hãy bấm chuột vào nút ログイン trên trang web.`, "warn");
-
-        // Highlight nút đăng nhập
-        const loginBtn = findLoginSubmitButton();
-        if (loginBtn) {
-            loginBtn.style.outline = "4px solid #ff4757";
-            loginBtn.style.outlineOffset = "3px";
-            loginBtn.style.boxShadow = "0 0 20px rgba(255, 71, 87, 0.6)";
-            loginBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
+        // Nghỉ tự nhiên trước khi kết thúc
+        await new Promise(r => setTimeout(r, gaussianRandom(400, 100)));
+        addLog(`✅ Đã điền xong Email & Mật khẩu.`, "success");
 
         return true;
     }
 
-    function submitLoginForm() {
-        addLog(`👆 Hãy bấm chuột thật vào nút ログイン trên trang web.`, "warn");
+    async function submitLoginForm() {
         const loginBtn = findLoginSubmitButton();
-        if (loginBtn) {
-            loginBtn.style.outline = "4px solid #ff4757";
-            loginBtn.style.outlineOffset = "3px";
-            loginBtn.style.boxShadow = "0 0 20px rgba(255, 71, 87, 0.6)";
-            loginBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (!loginBtn) {
+            addLog("Không tìm thấy nút đăng nhập (ログイン) trên màn hình.", "warn");
+            return false;
         }
+
+        addLog(`🖱️ Đang di chuột tới nút Đăng nhập...`, "info");
+        loginBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        // Highlight nút xanh nổi bật
+        loginBtn.style.outline = "4px solid #2ed573";
+        loginBtn.style.outlineOffset = "3px";
+        loginBtn.style.boxShadow = "0 0 25px rgba(46, 213, 115, 0.7)";
+
+        // Nghỉ tự nhiên như mắt người nhìn vào nút trước khi bấm
+        await new Promise(r => setTimeout(r, gaussianRandom(350, 80)));
+
+        // Kích hoạt chuỗi sự kiện chuột hoàn chỉnh (mouseenter -> mouseover -> mousemove -> mousedown -> mouseup -> click)
+        simulateMouseApproach(loginBtn);
+        loginBtn.focus();
+        loginBtn.click();
+        if (window.$) {
+            try { window.$(loginBtn).trigger('click'); } catch (e) {}
+        }
+
+        addLog(`🚀 Đã tự động kích hoạt Đăng nhập! Đang chờ website phản hồi...`, "success");
+        return true;
     }
 
     // =========================================================================
@@ -2297,7 +2305,12 @@
 
                 btnDoLogin.disabled = true;
                 btnDoLogin.textContent = "⌨️ Đang gõ phím...";
-                await fillLoginForm(acc);
+                const filled = await fillLoginForm(acc);
+                if (filled) {
+                    btnDoLogin.textContent = "🖱️ Đang bấm Đăng nhập...";
+                    await new Promise(r => setTimeout(r, gaussianRandom(500, 100)));
+                    await submitLoginForm();
+                }
                 btnDoLogin.disabled = false;
                 btnDoLogin.textContent = "🔑 TỰ ĐIỀN & BẤM ĐĂNG NHẬP";
             });
@@ -2438,12 +2451,15 @@
             }, 1200);
 
             if (shouldAutoLogin && activeAcc) {
-                // Đợi 5 giây cho F5 WAF telemetry scripts khởi tạo xong
-                addLog("⏳ Đợi 5 giây cho trang tải hoàn tất trước khi điền...", "info");
+                // Đợi 4 giây cho F5 WAF telemetry scripts khởi tạo xong
+                addLog("⏳ Đợi 4 giây cho trang tải hoàn tất trước khi tự động đăng nhập...", "info");
                 setTimeout(async () => {
-                    await fillLoginForm(activeAcc);
-                    // KHÔNG TỰ BẤM NÚT - để người dùng bấm chuột thật
-                }, 5000);
+                    const filled = await fillLoginForm(activeAcc);
+                    if (filled) {
+                        await new Promise(r => setTimeout(r, gaussianRandom(600, 150)));
+                        await submitLoginForm();
+                    }
+                }, 4000);
             } else if (activeAcc) {
                 addLog("Đã tải tài khoản. Bấm nút '🔑 TỰ ĐIỀN' khi bạn sẵn sàng.", "info");
             }
