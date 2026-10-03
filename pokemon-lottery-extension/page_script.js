@@ -385,13 +385,32 @@
     }
 
     function findLoginSubmitButton() {
-        return document.querySelector('#loginBtn') ||
-               document.querySelector('.loginBtn') ||
-               document.querySelector('button[type="submit"]') ||
+        // Ưu tiên 1: Cấu trúc chính xác trên Pokémon Center Online (div.comLoginBox a.btn.loginBtn)
+        const specific = document.querySelector('.comLoginBox a.loginBtn') ||
+                         document.querySelector('.comLoginBox .loginBtn') ||
+                         document.querySelector('.comLoginBox a.btn') ||
+                         document.querySelector('a.loginBtn') ||
+                         document.querySelector('.btn.loginBtn') ||
+                         document.querySelector('#loginBtn') ||
+                         document.querySelector('.loginBtn');
+        if (specific) return specific;
+
+        // Ưu tiên 2: Tìm trong form chứa password
+        const pwdInput = findLoginPasswordInput();
+        if (pwdInput) {
+            const form = pwdInput.closest('form') || pwdInput.closest('.comLoginBox') || pwdInput.closest('.comBox');
+            if (form) {
+                const btnInForm = form.querySelector('button[type="submit"], input[type="submit"], a.loginBtn, .btn');
+                if (btnInForm) return btnInForm;
+            }
+        }
+
+        // Ưu tiên 3: Fallback nút submit hoặc link text nhưng loại trừ header
+        return document.querySelector('button[type="submit"]') ||
                document.querySelector('input[type="submit"]') ||
                document.querySelector('a.comBtn01') ||
                Array.from(document.querySelectorAll('button, input[type="submit"], a')).find(b => {
-                   if (b.closest('#pk-auto-bot-container')) return false;
+                   if (b.closest('#pk-auto-bot-container') || b.closest('header') || b.closest('#header') || b.closest('.headerBox')) return false;
                    const txt = (b.textContent || b.value || '').trim();
                    return txt.includes('ログイン') || txt.includes('Sign In');
                });
@@ -728,6 +747,18 @@
         loginBtn.click();
         if (window.$) {
             try { window.$(loginBtn).trigger('click'); } catch (e) {}
+        }
+
+        // Backup: Kích hoạt submit form nếu là form tiêu chuẩn
+        const form = loginBtn.closest('form');
+        if (form) {
+            setTimeout(() => {
+                if (window.location.pathname.toLowerCase().includes('login')) {
+                    try {
+                        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                    } catch (e) {}
+                }
+            }, 1500);
         }
 
         addLog(`🚀 Đã tự động kích hoạt Đăng nhập! Đang chờ website phản hồi...`, "success");
