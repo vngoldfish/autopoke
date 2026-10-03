@@ -396,14 +396,143 @@
                    return txt.includes('ログイン') || txt.includes('Sign In');
                });
     }
+    // =========================================================================
+    // GIẢI LẬP HÀNH VI CON NGƯỜI (ANTI-BOT BYPASS ENGINE)
+    // F5 Volterra / Shape Security theo dõi:
+    //   - Keystroke dynamics (tốc độ, nhịp gõ, khoảng cách giữa các phím)
+    //   - Mouse movement / hover / click patterns
+    //   - Focus/blur timing
+    //   - Event isTrusted flag
+    // =========================================================================
 
-    // Hàm giả lập gõ từng ký tự giống con người thật
+    // Gaussian random: tạo delay phân bố chuẩn giống con người thật
+    function gaussianRandom(mean, stddev) {
+        let u = 0, v = 0;
+        while (u === 0) u = Math.random();
+        while (v === 0) v = Math.random();
+        const z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+        return Math.max(20, Math.round(mean + z * stddev));
+    }
+
+    // Lấy mã phím chuẩn cho từng ký tự (bao gồm ký tự đặc biệt)
+    function getKeyInfo(char) {
+        const special = {
+            '@': { code: 'Digit2', keyCode: 50, shiftKey: true },
+            '.': { code: 'Period', keyCode: 190, shiftKey: false },
+            ',': { code: 'Comma', keyCode: 188, shiftKey: false },
+            '-': { code: 'Minus', keyCode: 189, shiftKey: false },
+            '_': { code: 'Minus', keyCode: 189, shiftKey: true },
+            '!': { code: 'Digit1', keyCode: 49, shiftKey: true },
+            '#': { code: 'Digit3', keyCode: 51, shiftKey: true },
+            '$': { code: 'Digit4', keyCode: 52, shiftKey: true },
+            '%': { code: 'Digit5', keyCode: 53, shiftKey: true },
+            '&': { code: 'Digit7', keyCode: 55, shiftKey: true },
+            '*': { code: 'Digit8', keyCode: 56, shiftKey: true },
+            '+': { code: 'Equal', keyCode: 187, shiftKey: true },
+            '=': { code: 'Equal', keyCode: 187, shiftKey: false },
+            ' ': { code: 'Space', keyCode: 32, shiftKey: false },
+        };
+
+        if (special[char]) {
+            return { key: char, ...special[char] };
+        }
+        if (char >= '0' && char <= '9') {
+            return { key: char, code: 'Digit' + char, keyCode: char.charCodeAt(0), shiftKey: false };
+        }
+        const isUpper = char === char.toUpperCase() && char !== char.toLowerCase();
+        return {
+            key: char,
+            code: 'Key' + char.toUpperCase(),
+            keyCode: char.toUpperCase().charCodeAt(0),
+            shiftKey: isUpper
+        };
+    }
+
+    // Tính delay giữa 2 phím dựa trên loại ký tự (giống con người)
+    function getInterKeyDelay(prevChar, currentChar) {
+        // Ký tự đặc biệt (@, !, #) cần tìm trên bàn phím → chậm hơn
+        const specials = '@!#$%^&*()_+-=[]{}|;:\'",.<>?/`~';
+        if (specials.includes(currentChar)) {
+            return gaussianRandom(180, 50); // 130-230ms cho ký tự đặc biệt
+        }
+        // Chuyển từ chữ sang số hoặc ngược lại → hơi chậm
+        const isDigit = c => c >= '0' && c <= '9';
+        const isLetter = c => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+        if (prevChar && ((isDigit(prevChar) && isLetter(currentChar)) ||
+            (isLetter(prevChar) && isDigit(currentChar)))) {
+            return gaussianRandom(150, 40);
+        }
+        // Cùng tay (ước lượng đơn giản): các phím liền kề → nhanh hơn
+        const leftHand = 'qwertasdfgzxcvb';
+        const rightHand = 'yuiophjklnm';
+        const pl = prevChar ? prevChar.toLowerCase() : '';
+        const cl = currentChar.toLowerCase();
+        if (pl && leftHand.includes(pl) && leftHand.includes(cl)) {
+            return gaussianRandom(85, 25); // Cùng tay trái
+        }
+        if (pl && rightHand.includes(pl) && rightHand.includes(cl)) {
+            return gaussianRandom(85, 25); // Cùng tay phải
+        }
+        // Mặc định: phím bình thường
+        return gaussianRandom(95, 30); // 65-125ms (tốc độ gõ ~80 WPM)
+    }
+
+    // Giả lập di chuột vào element trước khi click/focus
+    function simulateMouseApproach(el) {
+        const rect = el.getBoundingClientRect();
+        const targetX = rect.left + rect.width / 2 + (Math.random() * 20 - 10);
+        const targetY = rect.top + rect.height / 2 + (Math.random() * 6 - 3);
+
+        el.dispatchEvent(new MouseEvent('mouseenter', {
+            clientX: targetX, clientY: targetY, bubbles: true
+        }));
+        el.dispatchEvent(new MouseEvent('mouseover', {
+            clientX: targetX, clientY: targetY, bubbles: true
+        }));
+        el.dispatchEvent(new MouseEvent('mousemove', {
+            clientX: targetX, clientY: targetY, bubbles: true
+        }));
+        el.dispatchEvent(new MouseEvent('mousedown', {
+            clientX: targetX, clientY: targetY, button: 0, bubbles: true
+        }));
+        el.dispatchEvent(new MouseEvent('mouseup', {
+            clientX: targetX, clientY: targetY, button: 0, bubbles: true
+        }));
+        el.dispatchEvent(new MouseEvent('click', {
+            clientX: targetX, clientY: targetY, button: 0, bubbles: true
+        }));
+    }
+
+    // Giả lập gõ từng ký tự giống con người thật (phiên bản nâng cao toàn diện)
     function simulateHumanType(input, text) {
         return new Promise(async (resolve) => {
-            input.focus();
-            input.dispatchEvent(new Event('focus', { bubbles: true }));
+            // 1. Di chuột vào ô input
+            simulateMouseApproach(input);
+            await new Promise(r => setTimeout(r, gaussianRandom(120, 30)));
 
-            // Xóa sạch giá trị cũ
+            // 2. Focus vào ô input
+            input.focus();
+            input.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+            input.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+            await new Promise(r => setTimeout(r, gaussianRandom(200, 50)));
+
+            // 3. Xóa sạch giá trị cũ (Select All + Delete)
+            if (input.value) {
+                input.dispatchEvent(new KeyboardEvent('keydown', {
+                    key: 'a', code: 'KeyA', keyCode: 65, ctrlKey: true, bubbles: true
+                }));
+                input.dispatchEvent(new KeyboardEvent('keyup', {
+                    key: 'a', code: 'KeyA', keyCode: 65, ctrlKey: true, bubbles: true
+                }));
+                await new Promise(r => setTimeout(r, gaussianRandom(80, 20)));
+
+                input.dispatchEvent(new KeyboardEvent('keydown', {
+                    key: 'Delete', code: 'Delete', keyCode: 46, bubbles: true
+                }));
+                input.dispatchEvent(new KeyboardEvent('keyup', {
+                    key: 'Delete', code: 'Delete', keyCode: 46, bubbles: true
+                }));
+            }
             try {
                 const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
                 setter.call(input, "");
@@ -411,27 +540,41 @@
                 input.value = "";
             }
             input.dispatchEvent(new Event('input', { bubbles: true }));
+            await new Promise(r => setTimeout(r, gaussianRandom(150, 40)));
 
-            // Gõ từng ký tự với delay ngẫu nhiên (giống người thật)
+            // 4. Gõ từng ký tự
+            let burstCount = 0;
+            const burstSize = 3 + Math.floor(Math.random() * 5); // Gõ liên tục 3-7 phím rồi nghỉ
+
             for (let i = 0; i < text.length; i++) {
                 const char = text[i];
-                const keyCode = char.charCodeAt(0);
+                const ki = getKeyInfo(char);
+                const prevChar = i > 0 ? text[i - 1] : null;
 
-                // Sự kiện keydown
+                // Nếu cần Shift (chữ hoa, ký tự đặc biệt): nhấn Shift trước
+                if (ki.shiftKey) {
+                    input.dispatchEvent(new KeyboardEvent('keydown', {
+                        key: 'Shift', code: 'ShiftLeft', keyCode: 16,
+                        shiftKey: true, bubbles: true, cancelable: true
+                    }));
+                    await new Promise(r => setTimeout(r, gaussianRandom(40, 15)));
+                }
+
+                // keydown
                 input.dispatchEvent(new KeyboardEvent('keydown', {
-                    key: char, code: 'Key' + char.toUpperCase(),
-                    keyCode: keyCode, which: keyCode,
-                    bubbles: true, cancelable: true
+                    key: ki.key, code: ki.code, keyCode: ki.keyCode, which: ki.keyCode,
+                    shiftKey: ki.shiftKey, bubbles: true, cancelable: true
                 }));
 
-                // Sự kiện keypress (deprecated nhưng vẫn cần cho F5 telemetry)
+                // keypress
                 input.dispatchEvent(new KeyboardEvent('keypress', {
-                    key: char, code: 'Key' + char.toUpperCase(),
-                    keyCode: keyCode, which: keyCode, charCode: keyCode,
-                    bubbles: true, cancelable: true
+                    key: ki.key, code: ki.code,
+                    keyCode: char.charCodeAt(0), which: char.charCodeAt(0),
+                    charCode: char.charCodeAt(0),
+                    shiftKey: ki.shiftKey, bubbles: true, cancelable: true
                 }));
 
-                // Cập nhật giá trị thực
+                // Cập nhật giá trị
                 const currentVal = input.value + char;
                 try {
                     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
@@ -440,27 +583,78 @@
                     input.value = currentVal;
                 }
 
-                // Sự kiện input (quan trọng nhất cho React/Gigya)
+                // input events (cả generic và InputEvent)
                 input.dispatchEvent(new Event('input', { bubbles: true }));
                 input.dispatchEvent(new InputEvent('input', {
-                    data: char, inputType: 'insertText', bubbles: true
+                    data: char, inputType: 'insertText',
+                    bubbles: true, cancelable: false, composed: true
                 }));
 
-                // Sự kiện keyup
+                // keyup (nhả phím, thường chậm hơn keydown 30-60ms)
+                await new Promise(r => setTimeout(r, gaussianRandom(45, 15)));
                 input.dispatchEvent(new KeyboardEvent('keyup', {
-                    key: char, code: 'Key' + char.toUpperCase(),
-                    keyCode: keyCode, which: keyCode,
-                    bubbles: true, cancelable: true
+                    key: ki.key, code: ki.code, keyCode: ki.keyCode, which: ki.keyCode,
+                    shiftKey: ki.shiftKey, bubbles: true, cancelable: true
                 }));
 
-                // Delay ngẫu nhiên giữa các phím (50-120ms, giống tốc độ gõ người thật)
-                const delay = 50 + Math.floor(Math.random() * 70);
-                await new Promise(r => setTimeout(r, delay));
+                // Nhả Shift nếu đang giữ
+                if (ki.shiftKey) {
+                    await new Promise(r => setTimeout(r, gaussianRandom(30, 10)));
+                    input.dispatchEvent(new KeyboardEvent('keyup', {
+                        key: 'Shift', code: 'ShiftLeft', keyCode: 16,
+                        shiftKey: false, bubbles: true, cancelable: true
+                    }));
+                }
+
+                // Tính delay tới phím tiếp theo
+                burstCount++;
+                let interDelay = getInterKeyDelay(prevChar, char);
+
+                // Nghỉ micro-pause sau mỗi burst (giống người thật dừng suy nghĩ)
+                if (burstCount >= burstSize) {
+                    interDelay += gaussianRandom(250, 80); // Thêm 170-330ms
+                    burstCount = 0;
+                }
+
+                // Nghỉ dài hơn sau dấu chấm hoặc @ (chuyển tâm trí)
+                if (char === '.' || char === '@') {
+                    interDelay += gaussianRandom(100, 30);
+                }
+
+                if (i < text.length - 1) {
+                    await new Promise(r => setTimeout(r, interDelay));
+                }
             }
 
-            // Kích hoạt change sau khi gõ xong
+            // 5. Kết thúc: change + blur
+            await new Promise(r => setTimeout(r, gaussianRandom(100, 30)));
             input.dispatchEvent(new Event('change', { bubbles: true }));
-            input.dispatchEvent(new Event('blur', { bubbles: true }));
+
+            resolve();
+        });
+    }
+
+    // Giả lập phím Tab giữa 2 ô input
+    function simulateTabKey(fromInput, toInput) {
+        return new Promise(async (resolve) => {
+            // Blur ô hiện tại
+            fromInput.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+            fromInput.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: toInput }));
+
+            // Phím Tab
+            fromInput.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'Tab', code: 'Tab', keyCode: 9, bubbles: true
+            }));
+            await new Promise(r => setTimeout(r, gaussianRandom(60, 20)));
+            toInput.dispatchEvent(new KeyboardEvent('keyup', {
+                key: 'Tab', code: 'Tab', keyCode: 9, bubbles: true
+            }));
+
+            // Focus ô mới
+            await new Promise(r => setTimeout(r, gaussianRandom(80, 25)));
+            toInput.focus();
+            toInput.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+            toInput.dispatchEvent(new FocusEvent('focusin', { bubbles: true, relatedTarget: fromInput }));
 
             resolve();
         });
@@ -476,18 +670,26 @@
             return false;
         }
 
-        addLog(`⌨️ Đang giả lập gõ phím Email cho [${acc.name || acc.pokemon_email}]...`, "info");
+        // Cuộn trang tới form login
+        emailInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await new Promise(r => setTimeout(r, gaussianRandom(600, 150)));
+
+        // Gõ Email
+        addLog(`⌨️ Đang nhập Email cho [${acc.name || acc.pokemon_email}]...`, "info");
         await simulateHumanType(emailInput, acc.pokemon_email || "");
-        addLog(`✅ Đã gõ xong Email!`, "success");
+        addLog(`✅ Đã nhập xong Email.`, "success");
 
-        // Nghỉ 300-600ms giữa 2 ô giống như tab sang ô tiếp
-        await new Promise(r => setTimeout(r, 300 + Math.floor(Math.random() * 300)));
+        // Tab sang ô password (giống người dùng bấm Tab)
+        await new Promise(r => setTimeout(r, gaussianRandom(400, 100)));
+        await simulateTabKey(emailInput, pwdInput);
+        await new Promise(r => setTimeout(r, gaussianRandom(300, 80)));
 
-        addLog(`⌨️ Đang giả lập gõ phím Mật khẩu...`, "info");
+        // Gõ Password
+        addLog(`⌨️ Đang nhập Mật khẩu...`, "info");
         await simulateHumanType(pwdInput, acc.pokemon_password || "");
-        addLog(`✅ Đã gõ xong Mật khẩu!`, "success");
+        addLog(`✅ Đã nhập xong Mật khẩu.`, "success");
 
-        // Cập nhật qua jQuery nếu có (backup)
+        // Trigger jQuery backup nếu có
         if (window.$) {
             try {
                 window.$(emailInput).trigger('input').trigger('change');
@@ -495,29 +697,26 @@
             } catch (e) {}
         }
 
-        addLog(`✅ Đã điền xong tất cả!`, "success");
-        addLog(``, "info");
-        addLog(`👆 BÂY GIỜ HÃY BẤM CHUỘT VÀO NÚT ĐĂNG NHẬP (ログイン) TRÊN TRANG WEB!`, "warn");
-        addLog(`⚠️ KHÔNG dùng nút tự động - phải bấm chuột thật lên nút cam/đỏ của trang web!`, "warn");
+        // Nghỉ tự nhiên trước khi thông báo
+        await new Promise(r => setTimeout(r, gaussianRandom(500, 120)));
 
-        // Highlight nút đăng nhập trên trang web để dễ nhận diện
+        addLog(``, "info");
+        addLog(`✅ Hoàn tất! Bây giờ hãy bấm chuột vào nút ログイン trên trang web.`, "warn");
+
+        // Highlight nút đăng nhập
         const loginBtn = findLoginSubmitButton();
         if (loginBtn) {
             loginBtn.style.outline = "4px solid #ff4757";
             loginBtn.style.outlineOffset = "3px";
             loginBtn.style.boxShadow = "0 0 20px rgba(255, 71, 87, 0.6)";
-            addLog(`🔴 Nút đăng nhập đã được tô viền đỏ nổi bật trên trang web!`, "info");
+            loginBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
 
         return true;
     }
 
     function submitLoginForm() {
-        // KHÔNG TỰ ĐỘNG BẤM NÚT NỮA - để người dùng bấm chuột thật
-        // F5 Volterra WAF sẽ chặn nếu phát hiện isTrusted=false từ .click()
-        addLog(`👆 HÃY BẤM CHUỘT THẬT VÀO NÚT ĐĂNG NHẬP (ログイン) TRÊN TRANG WEB!`, "warn");
-        addLog(`⚠️ Extension không thể tự bấm vì hệ thống chống bot sẽ chặn.`, "info");
-
+        addLog(`👆 Hãy bấm chuột thật vào nút ログイン trên trang web.`, "warn");
         const loginBtn = findLoginSubmitButton();
         if (loginBtn) {
             loginBtn.style.outline = "4px solid #ff4757";
