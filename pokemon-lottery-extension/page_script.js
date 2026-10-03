@@ -732,268 +732,300 @@
     // =========================================================================
 
     async function evaluateProfileTrustScore() {
-        const results = [];
-        let totalScore = 0;
-
-        // 1. Kiểm tra User-Agent & Version Mismatch (Tối đa 20 điểm)
-        const ua = navigator.userAgent || "";
-        const uad = navigator.userAgentData;
-        let uaScore = 20;
-        let uaStatus = "pass";
-        let uaDetail = "";
-        let uaTip = "";
-
-        const matchChromeUA = ua.match(/Chrome\/([0-9]+)/i);
-        const uaChromeVer = matchChromeUA ? parseInt(matchChromeUA[1], 10) : null;
-
-        let brandsChromeVer = null;
-        if (uad && uad.brands && Array.isArray(uad.brands)) {
-            const cBrand = uad.brands.find(b => {
-                const name = (b.brand || "").toLowerCase();
-                return name.includes("chromium") || name.includes("chrome") || name.includes("google chrome");
-            });
-            if (cBrand && cBrand.version) {
-                brandsChromeVer = parseInt(cBrand.version, 10);
-            }
-        }
-
-        if (ua.toLowerCase().includes("headless")) {
-            uaScore = 0;
-            uaStatus = "fail";
-            uaDetail = "Phát hiện HeadlessChrome! Dấu hiệu chắc chắn của bot tự động.";
-            uaTip = "Tắt cờ headless, mở Chrome giao diện người thật bình thường.";
-        } else if (uaChromeVer && brandsChromeVer && Math.abs(uaChromeVer - brandsChromeVer) > 2) {
-            uaScore = 0;
-            uaStatus = "fail";
-            uaDetail = `BẤT NHẤT PHIÊN BẢN: User-Agent là Chrome/${uaChromeVer} nhưng Client Hints là Chromium/${brandsChromeVer}!`;
-            uaTip = "Có extension (như Urban VPN) sửa đổi User-Agent gây lệch phiên bản. Hãy gỡ extension VPN và restart Chrome.";
-        } else if (uaChromeVer && uaChromeVer < 120) {
-            uaScore = 6;
-            uaStatus = "warn";
-            uaDetail = `Phiên bản Chrome hơi cũ: v${uaChromeVer} (khuyên dùng >= v125).`;
-            uaTip = "Hãy cập nhật trình duyệt Chrome lên phiên bản mới nhất.";
-        } else {
-            uaDetail = `User-Agent hợp lệ và nhất quán (Chrome v${uaChromeVer || "OK"}), không phát hiện giả mạo.`;
-        }
-
-        totalScore += uaScore;
-        results.push({
-            name: "User-Agent & Client Hints",
-            icon: "🧬",
-            status: uaStatus,
-            score: uaScore,
-            maxScore: 20,
-            detail: uaDetail,
-            tip: uaTip
-        });
-
-        // 2. Kiểm tra Cookie & Session WAF (Tối đa 25 điểm)
-        const rawCookies = document.cookie ? document.cookie.trim() : "";
-        const cookieList = rawCookies ? rawCookies.split(";").map(c => c.trim()).filter(Boolean) : [];
-        let cookieScore = 0;
-        let cookieStatus = "fail";
-        let cookieDetail = "";
-        let cookieTip = "";
-
-        if (cookieList.length === 0) {
-            cookieScore = 0;
-            cookieStatus = "fail";
-            cookieDetail = "Cookie hoàn toàn TRỐNG (0 cookie). F5 Volterra WAF sẽ coi đây là request không phiên và CHẶN 403 ngay!";
-            cookieTip = "Hãy mở trang chủ pokemoncenter-online.com lướt xem vài sản phẩm 5-10 phút để lưu cookie trước khi đăng nhập.";
-        } else if (cookieList.length < 4) {
-            cookieScore = 12;
-            cookieStatus = "warn";
-            cookieDetail = `Đã có ${cookieList.length} cookie. Phiên duyệt web còn mới, chưa có đủ độ ấm (warmup).`;
-            cookieTip = "Nên click xem 1-2 sản phẩm hoặc tin tức trên trang chủ để tích lũy thêm cookie tự nhiên.";
-        } else {
-            cookieScore = 25;
-            cookieStatus = "pass";
-            const hasGigya = cookieList.some(c => c.toLowerCase().includes("gigya") || c.toLowerCase().includes("gslb"));
-            const hasAnalytics = cookieList.some(c => c.startsWith("_ga") || c.startsWith("_pk"));
-            cookieDetail = `Đã có ${cookieList.length} cookie phiên. Dữ liệu duyệt web phong phú và tự nhiên.`;
-            if (hasGigya || hasAnalytics) {
-                cookieDetail += " (Có đầy đủ cookie theo dõi/phiên)";
-            }
-        }
-
-        totalScore += cookieScore;
-        results.push({
-            name: "Cookie & Session WAF",
-            icon: "🍪",
-            status: cookieStatus,
-            score: cookieScore,
-            maxScore: 25,
-            detail: cookieDetail,
-            tip: cookieTip
-        });
-
-        // 3. Kiểm tra Chế độ Ẩn danh (Incognito) (Tối đa 20 điểm)
-        let isIncognito = false;
-        let incognitoReason = "";
         try {
-            if (navigator.storage && navigator.storage.estimate) {
-                const { quota } = await navigator.storage.estimate();
-                if (quota && quota < 2 * 1024 * 1024 * 1024 && cookieList.length === 0) {
-                    isIncognito = true;
-                    incognitoReason = "Storage quota nhỏ (<2GB) kèm theo 0 cookie.";
+            const results = [];
+            let totalScore = 0;
+
+            // 1. Kiểm tra User-Agent & Version Mismatch (Tối đa 20 điểm)
+            const ua = navigator.userAgent || "";
+            const uad = navigator.userAgentData;
+            let uaScore = 20;
+            let uaStatus = "pass";
+            let uaDetail = "";
+            let uaTip = "";
+
+            const matchChromeUA = ua.match(/Chrome\/([0-9]+)/i);
+            const uaChromeVer = matchChromeUA ? parseInt(matchChromeUA[1], 10) : null;
+
+            let brandsChromeVer = null;
+            if (uad && uad.brands && Array.isArray(uad.brands)) {
+                const cBrand = uad.brands.find(b => {
+                    const name = (b.brand || "").toLowerCase();
+                    return name.includes("chromium") || name.includes("chrome") || name.includes("google chrome");
+                });
+                if (cBrand && cBrand.version) {
+                    brandsChromeVer = parseInt(cBrand.version, 10);
                 }
             }
-        } catch (e) {}
 
-        if (cookieList.length === 0 && (!window.localStorage || window.localStorage.length === 0)) {
-            isIncognito = true;
-            incognitoReason = "Không có cookie và LocalStorage hoàn toàn trắng.";
+            if (ua.toLowerCase().includes("headless")) {
+                uaScore = 0;
+                uaStatus = "fail";
+                uaDetail = "Phát hiện HeadlessChrome! Dấu hiệu chắc chắn của bot tự động.";
+                uaTip = "Tắt cờ headless, mở Chrome giao diện người thật bình thường.";
+            } else if (uaChromeVer && brandsChromeVer && Math.abs(uaChromeVer - brandsChromeVer) > 2) {
+                uaScore = 0;
+                uaStatus = "fail";
+                uaDetail = `BẤT NHẤT PHIÊN BẢN: User-Agent là Chrome/${uaChromeVer} nhưng Client Hints là Chromium/${brandsChromeVer}!`;
+                uaTip = "Có extension (như Urban VPN) sửa đổi User-Agent gây lệch phiên bản. Hãy gỡ extension VPN và restart Chrome.";
+            } else if (uaChromeVer && uaChromeVer < 120) {
+                uaScore = 6;
+                uaStatus = "warn";
+                uaDetail = `Phiên bản Chrome hơi cũ: v${uaChromeVer} (khuyên dùng >= v125).`;
+                uaTip = "Hãy cập nhật trình duyệt Chrome lên phiên bản mới nhất.";
+            } else {
+                uaDetail = `User-Agent hợp lệ và nhất quán (Chrome v${uaChromeVer || "OK"}), không phát hiện giả mạo.`;
+            }
+
+            totalScore += uaScore;
+            results.push({
+                name: "User-Agent & Client Hints",
+                icon: "🧬",
+                status: uaStatus,
+                score: uaScore,
+                maxScore: 20,
+                detail: uaDetail,
+                tip: uaTip
+            });
+
+            // 2. Kiểm tra Cookie & Session WAF (Tối đa 25 điểm)
+            const rawCookies = document.cookie ? document.cookie.trim() : "";
+            const cookieList = rawCookies ? rawCookies.split(";").map(c => c.trim()).filter(Boolean) : [];
+            let cookieScore = 0;
+            let cookieStatus = "fail";
+            let cookieDetail = "";
+            let cookieTip = "";
+
+            if (cookieList.length === 0) {
+                cookieScore = 0;
+                cookieStatus = "fail";
+                cookieDetail = "Cookie hoàn toàn TRỐNG (0 cookie). F5 Volterra WAF sẽ coi đây là request không phiên và CHẶN 403 ngay!";
+                cookieTip = "Hãy mở trang chủ pokemoncenter-online.com lướt xem vài sản phẩm 5-10 phút để lưu cookie trước khi đăng nhập.";
+            } else if (cookieList.length < 4) {
+                cookieScore = 12;
+                cookieStatus = "warn";
+                cookieDetail = `Đã có ${cookieList.length} cookie. Phiên duyệt web còn mới, chưa có đủ độ ấm (warmup).`;
+                cookieTip = "Nên click xem 1-2 sản phẩm hoặc tin tức trên trang chủ để tích lũy thêm cookie tự nhiên.";
+            } else {
+                cookieScore = 25;
+                cookieStatus = "pass";
+                const hasGigya = cookieList.some(c => c.toLowerCase().includes("gigya") || c.toLowerCase().includes("gslb"));
+                const hasAnalytics = cookieList.some(c => c.startsWith("_ga") || c.startsWith("_pk"));
+                cookieDetail = `Đã có ${cookieList.length} cookie phiên. Dữ liệu duyệt web phong phú và tự nhiên.`;
+                if (hasGigya || hasAnalytics) {
+                    cookieDetail += " (Có đầy đủ cookie theo dõi/phiên)";
+                }
+            }
+
+            totalScore += cookieScore;
+            results.push({
+                name: "Cookie & Session WAF",
+                icon: "🍪",
+                status: cookieStatus,
+                score: cookieScore,
+                maxScore: 25,
+                detail: cookieDetail,
+                tip: cookieTip
+            });
+
+            // 3. Kiểm tra Chế độ Ẩn danh (Incognito) (Tối đa 20 điểm)
+            let isIncognito = false;
+            let incognitoReason = "";
+            try {
+                if (navigator.storage && navigator.storage.estimate) {
+                    const quotaPromise = navigator.storage.estimate();
+                    const timeoutPromise = new Promise(r => setTimeout(() => r({ quota: 0 }), 300));
+                    const { quota } = await Promise.race([quotaPromise, timeoutPromise]);
+                    if (quota && quota < 2 * 1024 * 1024 * 1024 && cookieList.length === 0) {
+                        isIncognito = true;
+                        incognitoReason = "Storage quota nhỏ (<2GB) kèm theo 0 cookie.";
+                    }
+                }
+            } catch (e) {}
+
+            if (cookieList.length === 0 && (!window.localStorage || window.localStorage.length === 0)) {
+                isIncognito = true;
+                incognitoReason = "Không có cookie và LocalStorage hoàn toàn trắng.";
+            }
+
+            let incognitoScore = 20;
+            let incognitoStatus = "pass";
+            let incognitoDetail = "Đang duyệt trên Profile Chrome thông thường (lưu trữ và lịch sử bền vững).";
+            let incognitoTip = "";
+
+            if (isIncognito) {
+                incognitoScore = 0;
+                incognitoStatus = "fail";
+                incognitoDetail = `Nghi vấn trình duyệt ẨN DANH (Incognito): ${incognitoReason || "Môi trường không lưu cookie"}.`;
+                incognitoTip = "TUYỆT ĐỐI KHÔNG dùng ẩn danh để login Pokémon! Hãy tạo một Profile Chrome thường riêng (ví dụ 'Pokemon JP') để nuôi tài khoản.";
+            }
+
+            totalScore += incognitoScore;
+            results.push({
+                name: "Chế độ duyệt web",
+                icon: "🕵️",
+                status: incognitoStatus,
+                score: incognitoScore,
+                maxScore: 20,
+                detail: incognitoDetail,
+                tip: incognitoTip
+            });
+
+            // 4. Múi giờ & Ngôn ngữ (Tối đa 15 điểm)
+            const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+            const primaryLang = navigator.language || "";
+            const allLangs = navigator.languages || [primaryLang];
+
+            let tzScore = 0;
+            let tzStatus = "warn";
+            let tzTip = "";
+
+            if (tz === "Asia/Tokyo") {
+                tzScore += 10;
+            } else {
+                tzScore += 3;
+                tzTip += `Múi giờ hiện tại là "${tz}". Đối với website Nhật Bản, nên chỉnh múi giờ Windows thành "(UTC+09:00) Osaka, Sapporo, Tokyo". `;
+            }
+
+            const hasJapanese = allLangs.some(l => l.toLowerCase().startsWith("ja"));
+            if (hasJapanese) {
+                tzScore += 5;
+            } else {
+                tzScore += 1;
+                tzTip += `Ngôn ngữ Chrome hiện là "${primaryLang}". Khuyên dùng: thêm tiếng Nhật (日本語) vào đầu danh sách cài đặt ngôn ngữ Chrome.`;
+            }
+
+            if (tz === "Asia/Tokyo" && hasJapanese) {
+                tzStatus = "pass";
+            } else {
+                tzStatus = "warn";
+            }
+
+            totalScore += tzScore;
+            results.push({
+                name: "Múi giờ & Ngôn ngữ",
+                icon: "🕐",
+                status: tzStatus,
+                score: tzScore,
+                maxScore: 15,
+                detail: `Múi giờ: ${tz} | Ngôn ngữ: ${allLangs.slice(0, 3).join(", ")}`,
+                tip: tzTip
+            });
+
+            // 5. Cờ chống Bot (Webdriver & Automation) (Tối đa 10 điểm)
+            let botScore = 10;
+            let botStatus = "pass";
+            let botDetail = "Không phát hiện cờ điều khiển tự động (Webdriver / Selenium sạch).";
+            let botTip = "";
+
+            if (navigator.webdriver) {
+                botScore = 0;
+                botStatus = "fail";
+                botDetail = "CẢNH BÁO: Cờ navigator.webdriver = true! Trình duyệt đang bị nhận diện là công cụ tự động (Selenium/Puppeteer).";
+                botTip = "Hãy mở trình duyệt Chrome bằng tay từ desktop, không mở qua script tự động hóa.";
+            }
+
+            totalScore += botScore;
+            results.push({
+                name: "Cờ chống Bot (Webdriver)",
+                icon: "🤖",
+                status: botStatus,
+                score: botScore,
+                maxScore: 10,
+                detail: botDetail,
+                tip: botTip
+            });
+
+            // 6. Cảm biến F5 WAF & Gigya (Tối đa 10 điểm)
+            let f5Score = 10;
+            let f5Status = "pass";
+            let f5Detail = "";
+            let f5Tip = "";
+
+            const gigyaLoaded = !!(window.gigya && window.gigya.accounts);
+            const recaptchaScript = !!document.querySelector('script[src*="recaptcha"]');
+            const f5Active = !!(document.querySelector('script[src*="sso.htm"]') || window.gigya || document.querySelector('script[src*="gigya"]'));
+
+            if (gigyaLoaded) {
+                f5Detail = "Thư viện bảo mật Gigya & F5 sensor đã sẵn sàng xử lý yêu cầu.";
+            } else if (f5Active || recaptchaScript) {
+                f5Score = 7;
+                f5Status = "warn";
+                f5Detail = "Thư viện bảo mật đang trong quá trình tải. Hãy đợi thêm vài giây.";
+                f5Tip = "Đợi 3-5 giây cho trang hoàn tất khởi tạo trước khi đăng nhập.";
+            } else {
+                f5Score = 3;
+                f5Status = "warn";
+                f5Detail = "Chưa phát hiện bộ giải mã Gigya/reCAPTCHA trên trang.";
+                f5Tip = "Đảm bảo bạn đang ở đúng trang đăng nhập của Pokémon Center.";
+            }
+
+            totalScore += f5Score;
+            results.push({
+                name: "Cảm biến F5 WAF & Gigya",
+                icon: "📡",
+                status: f5Status,
+                score: f5Score,
+                maxScore: 10,
+                detail: f5Detail,
+                tip: f5Tip
+            });
+
+            // Phân loại Level & Màu sắc
+            let level = "excellent";
+            let levelText = "RẤT AN TOÀN";
+            let color = "#2ed573";
+            let summary = "Profile có độ tin cậy cao, đầy đủ cookie và thông số tự nhiên. Sẵn sàng đăng nhập an toàn!";
+
+            if (totalScore < 60) {
+                level = "danger";
+                levelText = "NGUY HIỂM (DỄ BỊ 403)";
+                color = "#ff4757";
+                summary = "Phát hiện nhiều bất thường (thiếu cookie, ẩn danh, hoặc lệch User-Agent). KHÔNG NÊN đăng nhập lúc này kẻo bị WAF chặn!";
+            } else if (totalScore < 85) {
+                level = "warning";
+                levelText = "TRUNG BÌNH (CẦN TỐI ƯU)";
+                color = "#ffa502";
+                summary = "Profile có thể đăng nhập được nhưng chưa tối ưu (thiếu cookie dày, múi giờ chưa khớp Tokyo...). Nên làm theo hướng dẫn khắc phục.";
+            }
+
+            return {
+                score: totalScore,
+                level,
+                levelText,
+                color,
+                summary,
+                items: results
+            };
+        } catch (err) {
+            console.error("Lỗi khi đánh giá profile:", err);
+            return {
+                score: 55,
+                level: "warning",
+                levelText: "CẦN KIỂM TRA",
+                color: "#ffa502",
+                summary: "Quá trình quét gặp phản hồi chậm từ trình duyệt: " + (err.message || "Không xác định"),
+                items: []
+            };
         }
+    }
 
-        let incognitoScore = 20;
-        let incognitoStatus = "pass";
-        let incognitoDetail = "Đang duyệt trên Profile Chrome thông thường (lưu trữ và lịch sử bền vững).";
-        let incognitoTip = "";
-
-        if (isIncognito) {
-            incognitoScore = 0;
-            incognitoStatus = "fail";
-            incognitoDetail = `Nghi vấn trình duyệt ẨN DANH (Incognito): ${incognitoReason || "Môi trường không lưu cookie"}.`;
-            incognitoTip = "TUYỆT ĐỐI KHÔNG dùng ẩn danh để login Pokémon! Hãy tạo một Profile Chrome thường riêng (ví dụ 'Pokemon JP') để nuôi tài khoản.";
+    function logAuditSummary(auditData) {
+        if (!auditData) return;
+        addLog(`🛡️ KẾT QUẢ ĐÁNH GIÁ PROFILE: ${auditData.score}/100 điểm [${auditData.levelText}]`, auditData.level === "excellent" ? "success" : auditData.level === "warning" ? "warn" : "err");
+        if (auditData.items && auditData.items.length > 0) {
+            auditData.items.forEach(it => {
+                const icon = it.status === "pass" ? "✅" : it.status === "warn" ? "⚠️" : "❌";
+                const lvl = it.status === "pass" ? "info" : it.status === "warn" ? "warn" : "err";
+                addLog(`   ${icon} ${it.name}: +${it.score}/${it.maxScore}đ (${it.detail})`, lvl);
+                if (it.tip) {
+                    addLog(`      👉 Khắc phục: ${it.tip}`, "warn");
+                }
+            });
         }
-
-        totalScore += incognitoScore;
-        results.push({
-            name: "Chế độ duyệt web",
-            icon: "🕵️",
-            status: incognitoStatus,
-            score: incognitoScore,
-            maxScore: 20,
-            detail: incognitoDetail,
-            tip: incognitoTip
-        });
-
-        // 4. Múi giờ & Ngôn ngữ (Tối đa 15 điểm)
-        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
-        const primaryLang = navigator.language || "";
-        const allLangs = navigator.languages || [primaryLang];
-
-        let tzScore = 0;
-        let tzStatus = "warn";
-        let tzTip = "";
-
-        if (tz === "Asia/Tokyo") {
-            tzScore += 10;
-        } else {
-            tzScore += 3;
-            tzTip += `Múi giờ hiện tại là "${tz}". Đối với website Nhật Bản, nên chỉnh múi giờ Windows thành "(UTC+09:00) Osaka, Sapporo, Tokyo". `;
+        if (auditData.score < 60) {
+            addLog(`⚠️ CẢNH BÁO NGUY HIỂM: Điểm quá thấp. Dễ bị F5 WAF chặn 403! Vui lòng khắc phục các mục ❌ trước khi login.`, "err");
         }
-
-        const hasJapanese = allLangs.some(l => l.toLowerCase().startsWith("ja"));
-        if (hasJapanese) {
-            tzScore += 5;
-        } else {
-            tzScore += 1;
-            tzTip += `Ngôn ngữ Chrome hiện là "${primaryLang}". Khuyên dùng: thêm tiếng Nhật (日本語) vào đầu danh sách cài đặt ngôn ngữ Chrome.`;
-        }
-
-        if (tz === "Asia/Tokyo" && hasJapanese) {
-            tzStatus = "pass";
-        } else {
-            tzStatus = "warn";
-        }
-
-        totalScore += tzScore;
-        results.push({
-            name: "Múi giờ & Ngôn ngữ",
-            icon: "🕐",
-            status: tzStatus,
-            score: tzScore,
-            maxScore: 15,
-            detail: `Múi giờ: ${tz} | Ngôn ngữ: ${allLangs.slice(0, 3).join(", ")}`,
-            tip: tzTip
-        });
-
-        // 5. Cờ chống Bot (Webdriver & Automation) (Tối đa 10 điểm)
-        let botScore = 10;
-        let botStatus = "pass";
-        let botDetail = "Không phát hiện cờ điều khiển tự động (Webdriver / Selenium sạch).";
-        let botTip = "";
-
-        if (navigator.webdriver) {
-            botScore = 0;
-            botStatus = "fail";
-            botDetail = "CẢNH BÁO: Cờ navigator.webdriver = true! Trình duyệt đang bị nhận diện là công cụ tự động (Selenium/Puppeteer).";
-            botTip = "Hãy mở trình duyệt Chrome bằng tay từ desktop, không mở qua script tự động hóa.";
-        }
-
-        totalScore += botScore;
-        results.push({
-            name: "Cờ chống Bot (Webdriver)",
-            icon: "🤖",
-            status: botStatus,
-            score: botScore,
-            maxScore: 10,
-            detail: botDetail,
-            tip: botTip
-        });
-
-        // 6. Cảm biến F5 WAF & Gigya (Tối đa 10 điểm)
-        let f5Score = 10;
-        let f5Status = "pass";
-        let f5Detail = "";
-        let f5Tip = "";
-
-        const gigyaLoaded = !!(window.gigya && window.gigya.accounts);
-        const recaptchaScript = !!document.querySelector('script[src*="recaptcha"]');
-        const f5Active = !!(document.querySelector('script[src*="sso.htm"]') || window.gigya || document.querySelector('script[src*="gigya"]'));
-
-        if (gigyaLoaded) {
-            f5Detail = "Thư viện bảo mật Gigya & F5 sensor đã sẵn sàng xử lý yêu cầu.";
-        } else if (f5Active || recaptchaScript) {
-            f5Score = 7;
-            f5Status = "warn";
-            f5Detail = "Thư viện bảo mật đang trong quá trình tải. Hãy đợi thêm vài giây.";
-            f5Tip = "Đợi 3-5 giây cho trang hoàn tất khởi tạo trước khi đăng nhập.";
-        } else {
-            f5Score = 3;
-            f5Status = "warn";
-            f5Detail = "Chưa phát hiện bộ giải mã Gigya/reCAPTCHA trên trang.";
-            f5Tip = "Đảm bảo bạn đang ở đúng trang đăng nhập của Pokémon Center.";
-        }
-
-        totalScore += f5Score;
-        results.push({
-            name: "Cảm biến F5 WAF & Gigya",
-            icon: "📡",
-            status: f5Status,
-            score: f5Score,
-            maxScore: 10,
-            detail: f5Detail,
-            tip: f5Tip
-        });
-
-        // Phân loại Level & Màu sắc
-        let level = "excellent";
-        let levelText = "RẤT AN TOÀN";
-        let color = "#2ed573";
-        let summary = "Profile có độ tin cậy cao, đầy đủ cookie và thông số tự nhiên. Sẵn sàng đăng nhập an toàn!";
-
-        if (totalScore < 60) {
-            level = "danger";
-            levelText = "NGUY HIỂM (DỄ BỊ 403)";
-            color = "#ff4757";
-            summary = "Phát hiện nhiều bất thường (thiếu cookie, ẩn danh, hoặc lệch User-Agent). KHÔNG NÊN đăng nhập lúc này kẻo bị WAF chặn!";
-        } else if (totalScore < 85) {
-            level = "warning";
-            levelText = "TRUNG BÌNH (CẦN TỐI ƯU)";
-            color = "#ffa502";
-            summary = "Profile có thể đăng nhập được nhưng chưa tối ưu (thiếu cookie dày, múi giờ chưa khớp Tokyo...). Nên làm theo hướng dẫn khắc phục.";
-        }
-
-        return {
-            score: totalScore,
-            level,
-            levelText,
-            color,
-            summary,
-            items: results
-        };
     }
 
     function updateTrustScoreUI(auditData) {
@@ -1037,6 +1069,7 @@
         const overlay = document.createElement("div");
         overlay.id = "pk-audit-modal-overlay";
         overlay.className = "pk-modal-overlay";
+        overlay.style.cssText = "position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; background: rgba(0, 0, 0, 0.75) !important; backdrop-filter: blur(4px) !important; z-index: 10000000 !important; display: flex !important; align-items: center !important; justify-content: center !important;";
 
         overlay.innerHTML = `
             <div class="pk-audit-modal-content">
@@ -2220,6 +2253,7 @@
                 addLog("🩺 Đang phân tích độ tin tưởng Profile hiện tại...", "info");
                 const auditData = await evaluateProfileTrustScore();
                 updateTrustScoreUI(auditData);
+                logAuditSummary(auditData);
                 openProfileAuditModal(auditData);
             });
         }
@@ -2228,9 +2262,10 @@
         const btnOpenAudit = document.getElementById("pk-btn-open-audit");
         if (btnOpenAudit) {
             btnOpenAudit.addEventListener("click", async () => {
-                addLog("Đang chạy kiểm tra chi tiết profile...", "info");
+                addLog("🩺 Đang phân tích độ tin tưởng Profile hiện tại...", "info");
                 const auditData = await evaluateProfileTrustScore();
                 updateTrustScoreUI(auditData);
+                logAuditSummary(auditData);
                 openProfileAuditModal(auditData);
             });
         }
@@ -2242,7 +2277,7 @@
                 const auditData = await evaluateProfileTrustScore();
                 updateTrustScoreUI(auditData);
                 btnRescanTrust.textContent = "🔄 Quét lại";
-                addLog(`Đã quét lại profile: ${auditData.score}/100 điểm [${auditData.levelText}].`, auditData.level === "excellent" ? "success" : auditData.level === "warning" ? "warn" : "err");
+                logAuditSummary(auditData);
             });
         }
 
@@ -2399,10 +2434,7 @@
             setTimeout(async () => {
                 const audit = await evaluateProfileTrustScore();
                 updateTrustScoreUI(audit);
-                addLog(`🛡️ Đã đánh giá Profile: ${audit.score}/100 điểm [${audit.levelText}]`, audit.level === "excellent" ? "success" : audit.level === "warning" ? "warn" : "err");
-                if (audit.score < 60) {
-                    addLog(`⚠️ CẢNH BÁO: Điểm Profile thấp (${audit.score}/100). Dễ bị F5 WAF chặn 403! Bấm "🩺 Xem Chi Tiết Báo Cáo" để xem hướng dẫn sửa.`, "warn");
-                }
+                logAuditSummary(audit);
             }, 1200);
 
             if (shouldAutoLogin && activeAcc) {
