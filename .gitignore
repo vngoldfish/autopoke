@@ -20,3 +20,6 @@ err/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Multi-agent internal artifacts
+.agents/

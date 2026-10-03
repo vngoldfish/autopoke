@@ -1,27 +1,109 @@
-/* Floating widget container */
+/* ==========================================================================
+   POKÉMON CENTER LOTTERY & CHECKOUT BOT - IN-PAGE DASHBOARD STYLES
+   ==========================================================================
+   Author: Senior Frontend Design & CSS Engineer (teamwork_preview_worker)
+   Milestone: M3 (UI/UX Overhaul & Modern Design System)
+   Features Covered:
+     - F-23: In-Page 6-Step Visual Stepper
+     - F-24 & F-25: Color-Coded Log Table & Console Controls
+     - F-26: Quick Action Controls Toolbar
+     - F-27: Security & Alert Banner (WAF, reCAPTCHA, MFA Challenges)
+     - General Layout & Modern Glassmorphism Aesthetic
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. Root Variables & Theme Tokens
+   -------------------------------------------------------------------------- */
+:root {
+    --pk-bg-primary: #161b22;
+    --pk-bg-secondary: #21262d;
+    --pk-bg-tertiary: #30363d;
+    --pk-bg-translucent: rgba(22, 27, 34, 0.94);
+    --pk-bg-card: rgba(33, 38, 45, 0.85);
+    --pk-border-subtle: rgba(240, 246, 252, 0.1);
+    --pk-border-muted: #30363d;
+    --pk-text-primary: #f0f6fc;
+    --pk-text-secondary: #8b949e;
+    --pk-text-muted: #6e7681;
+
+    /* Semantic Status Colors */
+    --pk-color-info: #58a6ff;
+    --pk-color-info-cyan: #00cec9;
+    --pk-color-info-bg: rgba(56, 139, 253, 0.16);
+    --pk-color-info-border: rgba(88, 166, 255, 0.35);
+
+    --pk-color-success: #2ed573;
+    --pk-color-success-dark: #10ac84;
+    --pk-color-success-bg: rgba(46, 213, 115, 0.16);
+    --pk-color-success-border: rgba(46, 213, 115, 0.4);
+
+    --pk-color-warn: #ffa502;
+    --pk-color-warn-dark: #ff7f50;
+    --pk-color-warn-bg: rgba(255, 165, 2, 0.16);
+    --pk-color-warn-border: rgba(255, 165, 2, 0.4);
+
+    --pk-color-error: #ff4757;
+    --pk-color-error-dark: #ee1515;
+    --pk-color-error-bg: rgba(255, 71, 87, 0.16);
+    --pk-color-error-border: rgba(255, 71, 87, 0.45);
+
+    --pk-color-purple: #8b5cf6;
+    --pk-color-purple-bg: rgba(139, 92, 246, 0.16);
+    --pk-color-purple-border: rgba(139, 92, 246, 0.4);
+
+    --pk-color-accent: #ff4757;
+    --pk-shadow-elevation: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.08);
+    --pk-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans JP", sans-serif;
+    --pk-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+/* --------------------------------------------------------------------------
+   2. Floating Container Layout & Window Controls
+   -------------------------------------------------------------------------- */
 #pk-auto-bot-container {
     position: fixed;
-    top: 15px;
-    right: 15px;
+    top: 16px;
+    right: 16px;
     width: 480px;
     max-width: 95vw;
-    background: #1e1e24;
-    color: #f1f2f6;
-    border-radius: 12px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 0 2px #ff4757;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans JP", sans-serif;
+    background: var(--pk-bg-translucent);
+    color: var(--pk-text-primary);
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 71, 87, 0.25);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    font-family: var(--pk-font-sans);
     font-size: 13px;
     z-index: 9999999;
     overflow: hidden;
-    transition: width 0.25s ease, height 0.25s ease, top 0.25s ease, left 0.25s ease, right 0.25s ease, border-radius 0.25s ease;
+    transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                height 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                top 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                left 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                right 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                border-radius 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+#pk-auto-bot-container * {
+    box-sizing: border-box;
+}
+
+/* Optional Bottom-Right Docking */
+#pk-auto-bot-container.pk-dock-bottom-right {
+    top: auto !important;
+    bottom: 16px !important;
+    right: 16px !important;
+}
+
+/* Expanded Two-Column Mode */
 #pk-auto-bot-container.pk-expanded {
     width: 680px;
     max-width: 96vw;
 }
 
-/* Phóng to toàn màn hình */
+/* Fullscreen Immersion Mode */
 #pk-auto-bot-container.pk-fullscreen {
     top: 10px !important;
     left: 10px !important;
@@ -32,22 +114,19 @@
     height: calc(100vh - 20px) !important;
     max-height: none !important;
     border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.8), 0 0 0 2px var(--pk-color-accent);
 }
 
-#pk-auto-bot-container * {
-    box-sizing: border-box;
-}
-
-/* Thu nhỏ thành thanh nổi */
+/* Minimized Floating Pill Mode */
 #pk-auto-bot-container.minimized {
-    width: 270px !important;
+    width: 280px !important;
     height: auto !important;
-    border-radius: 20px;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6), 0 0 0 2px #ff4757;
+    border-radius: 24px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65), 0 0 0 2px var(--pk-color-accent);
 }
 
 #pk-auto-bot-container.minimized #pk-bot-header {
-    border-radius: 20px;
+    border-radius: 24px;
     padding: 8px 14px;
 }
 
@@ -55,6 +134,7 @@
     display: none !important;
 }
 
+/* Header Bar */
 #pk-bot-header {
     background: linear-gradient(135deg, #ff4757, #ee1515);
     color: #fff;
@@ -62,16 +142,22 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    cursor: pointer;
+    cursor: grab;
     user-select: none;
+    transition: background 0.2s ease;
+}
+
+#pk-bot-header:active {
+    cursor: grabbing;
 }
 
 #pk-bot-header .pk-title {
     font-weight: 700;
-    font-size: 14px;
+    font-size: 13.5px;
     display: flex;
     align-items: center;
     gap: 8px;
+    letter-spacing: 0.3px;
 }
 
 #pk-bot-header .pk-controls {
@@ -85,20 +171,26 @@
     color: #fff;
     width: 26px;
     height: 26px;
-    border-radius: 5px;
+    border-radius: 6px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     font-weight: bold;
-    font-size: 14px;
-    transition: all 0.2s;
+    font-size: 13px;
+    transition: background 0.15s ease, transform 0.15s ease;
 }
 
 #pk-bot-header .pk-btn-icon:hover {
     background: rgba(255, 255, 255, 0.4);
+    transform: translateY(-1px);
 }
 
+#pk-bot-header .pk-btn-icon:active {
+    transform: translateY(0);
+}
+
+/* Body Container */
 #pk-bot-body {
     padding: 14px;
     max-height: 88vh;
@@ -108,14 +200,15 @@
     gap: 10px;
 }
 
-/* Các cột giao diện */
-.pk-col-main, .pk-col-logs {
+/* Layout Columns */
+.pk-col-main,
+.pk-col-logs {
     display: flex;
     flex-direction: column;
     gap: 10px;
 }
 
-/* Khi ở chế độ Fullscreen: bố cục 2 cột song song */
+/* Fullscreen Multi-Column Grid */
 #pk-auto-bot-container.pk-fullscreen #pk-bot-body {
     height: calc(100vh - 65px) !important;
     max-height: calc(100vh - 65px) !important;
@@ -153,6 +246,838 @@
     font-size: 13px;
 }
 
+/* --------------------------------------------------------------------------
+   3. In-Page 6-Step Visual Stepper (Feature F-23)
+   6 steps:
+     1. Đăng nhập ➜ 2. Quét kết quả ➜ 3. Đặt trước/Giỏ hàng ➜
+     4. Địa chỉ ➜ 5. Thanh toán ➜ 6. Chốt đơn
+   -------------------------------------------------------------------------- */
+#pk-stepper-container,
+.pk-stepper-container {
+    background: var(--pk-bg-card);
+    border: 1px solid var(--pk-border-muted);
+    border-radius: 10px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 6px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.pk-stepper-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11.5px;
+}
+
+.pk-stepper-title {
+    color: var(--pk-text-secondary);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+#pk-stepper-current-info,
+.pk-stepper-current-badge {
+    color: var(--pk-color-success);
+    font-weight: 700;
+    font-size: 11.5px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--pk-color-success-bg);
+    border: 1px solid var(--pk-color-success-border);
+    border-radius: 6px;
+    padding: 2px 8px;
+}
+
+/* Stepper Bar - Flex Track */
+#pk-stepper-bar,
+.pk-stepper-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: relative;
+    width: 100%;
+    gap: 4px;
+    padding: 4px 0;
+}
+
+/* Segment Style (6-segment progress bar) */
+.pk-stepper-step {
+    flex: 1;
+    height: 6px;
+    border-radius: 3px;
+    background: #30363d;
+    position: relative;
+    cursor: default;
+    transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.2s ease;
+}
+
+.pk-stepper-step:hover {
+    transform: translateY(-1px);
+}
+
+.pk-stepper-step.completed {
+    background: var(--pk-color-success) !important;
+    box-shadow: 0 0 6px rgba(46, 213, 115, 0.35);
+}
+
+.pk-stepper-step.active {
+    background: var(--pk-color-info) !important;
+    box-shadow: 0 0 10px rgba(88, 166, 255, 0.7);
+    animation: pkSegmentPulse 1.8s infinite;
+}
+
+.pk-stepper-step.active.warn,
+.pk-stepper-step.active.amber {
+    background: var(--pk-color-warn) !important;
+    box-shadow: 0 0 10px rgba(255, 165, 2, 0.7);
+    animation: pkSegmentPulseAmber 1.8s infinite;
+}
+
+.pk-stepper-step.error,
+.pk-stepper-step.blocked {
+    background: var(--pk-color-error) !important;
+    box-shadow: 0 0 10px rgba(255, 71, 87, 0.75);
+    animation: pkSegmentPulseError 1.5s infinite;
+}
+
+/* Node-and-Connector Style (Detailed Stepper with circles and labels) */
+.pk-stepper-track {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    position: relative;
+}
+
+.pk-step-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    flex: 1;
+    text-align: center;
+    user-select: none;
+    cursor: default;
+    transition: all 0.25s ease;
+}
+
+.pk-step-connector {
+    flex: 1;
+    height: 2px;
+    background: var(--pk-border-muted);
+    transition: background 0.3s ease;
+    margin: 0 -2px;
+    position: relative;
+    top: -9px;
+    z-index: 1;
+}
+
+.pk-step-connector.completed {
+    background: var(--pk-color-success);
+    box-shadow: 0 0 4px rgba(46, 213, 115, 0.4);
+}
+
+.pk-step-connector.active {
+    background: linear-gradient(90deg, var(--pk-color-success), var(--pk-color-info));
+}
+
+.pk-step-circle {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--pk-bg-secondary);
+    border: 2px solid var(--pk-border-muted);
+    color: var(--pk-text-secondary);
+    font-weight: 700;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    z-index: 2;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pk-step-label {
+    margin-top: 4px;
+    font-size: 9.5px;
+    font-weight: 600;
+    color: var(--pk-text-muted);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    max-width: 72px;
+    overflow: hidden;
+    transition: color 0.25s ease;
+}
+
+/* Stepper States: Active, Completed, Error / Blocked */
+.pk-step-item.active .pk-step-circle {
+    background: #1f6feb;
+    border-color: #58a6ff;
+    color: #ffffff;
+    box-shadow: 0 0 0 0 rgba(88, 166, 255, 0.7);
+    animation: pkStepPulse 1.8s infinite;
+}
+
+.pk-step-item.active .pk-step-label {
+    color: #58a6ff;
+    font-weight: 700;
+}
+
+.pk-step-item.active.warn .pk-step-circle,
+.pk-step-item.active.amber .pk-step-circle {
+    background: #d29922;
+    border-color: #ffa502;
+    color: #ffffff;
+    box-shadow: 0 0 0 0 rgba(255, 165, 2, 0.7);
+    animation: pkStepPulseAmber 1.8s infinite;
+}
+
+.pk-step-item.active.warn .pk-step-label,
+.pk-step-item.active.amber .pk-step-label {
+    color: #ffa502;
+    font-weight: 700;
+}
+
+.pk-step-item.completed .pk-step-circle {
+    background: #238636;
+    border-color: #2ea043;
+    color: #ffffff;
+    box-shadow: 0 0 8px rgba(46, 213, 115, 0.3);
+}
+
+.pk-step-item.completed .pk-step-label {
+    color: #2ed573;
+    font-weight: 600;
+}
+
+.pk-step-item.error .pk-step-circle,
+.pk-step-item.blocked .pk-step-circle {
+    background: #da3633;
+    border-color: #ff4757;
+    color: #ffffff;
+    box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.75);
+    animation: pkStepPulseError 1.5s infinite;
+}
+
+.pk-step-item.error .pk-step-label,
+.pk-step-item.blocked .pk-step-label {
+    color: #ff4757;
+    font-weight: 700;
+}
+
+/* --------------------------------------------------------------------------
+   4. Quick Action Controls Toolbar (Feature F-26)
+   Buttons:
+     - [▶ Tiếp tục] (.pk-action-resume / .pk-action-start / #pk-btn-quick-resume): Vibrant emerald green
+     - [⏸ Tạm dừng] (.pk-action-pause / #pk-btn-quick-pause): Amber / warning pause
+     - [⏭ Bỏ qua bước] (.pk-action-skip / #pk-btn-quick-skip): Purple / indigo forward step
+     - [🔄 Thử lại] (.pk-action-retry / #pk-btn-quick-retry): Cyan / teal refresh
+     - [🛒 Đến Giỏ hàng] (.pk-action-cart / #pk-btn-quick-cart): Blue accent
+   -------------------------------------------------------------------------- */
+#pk-quick-actions-bar,
+.pk-quick-actions-bar {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    padding: 6px;
+    background: var(--pk-bg-card);
+    border: 1px solid var(--pk-border-muted);
+    border-radius: 8px;
+    flex-wrap: wrap;
+}
+
+.pk-quick-action-btn,
+.pk-quick-btn {
+    flex: 1;
+    min-width: 68px;
+    padding: 6px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    text-align: center;
+    white-space: nowrap;
+    user-select: none;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Button 1: [▶ Tiếp tục] - Vibrant Emerald Green */
+.pk-action-resume,
+.pk-action-start,
+#pk-btn-quick-resume {
+    background: var(--pk-color-success-bg);
+    border-color: var(--pk-color-success);
+    color: var(--pk-color-success);
+}
+
+.pk-action-resume:hover:not(:disabled),
+.pk-action-start:hover:not(:disabled),
+#pk-btn-quick-resume:hover:not(:disabled) {
+    background: var(--pk-color-success);
+    color: #0d1117;
+    box-shadow: 0 4px 12px rgba(46, 213, 115, 0.4);
+    transform: translateY(-1px);
+}
+
+.pk-action-resume:active:not(:disabled),
+.pk-action-start:active:not(:disabled),
+#pk-btn-quick-resume:active:not(:disabled) {
+    transform: translateY(0);
+    filter: brightness(0.9);
+}
+
+/* Button 2: [⏸ Tạm dừng] - Amber / Warning Pause */
+.pk-action-pause,
+#pk-btn-quick-pause {
+    background: var(--pk-color-warn-bg);
+    border-color: var(--pk-color-warn);
+    color: var(--pk-color-warn);
+}
+
+.pk-action-pause:hover:not(:disabled),
+#pk-btn-quick-pause:hover:not(:disabled) {
+    background: var(--pk-color-warn);
+    color: #0d1117;
+    box-shadow: 0 4px 12px rgba(255, 165, 2, 0.4);
+    transform: translateY(-1px);
+}
+
+.pk-action-pause:active:not(:disabled),
+#pk-btn-quick-pause:active:not(:disabled) {
+    transform: translateY(0);
+    filter: brightness(0.9);
+}
+
+/* Button 3: [⏭ Bỏ qua bước] - Purple / Indigo Forward Step */
+.pk-action-skip,
+#pk-btn-quick-skip {
+    background: var(--pk-color-purple-bg);
+    border-color: var(--pk-color-purple);
+    color: #a78bfa;
+}
+
+.pk-action-skip:hover:not(:disabled),
+#pk-btn-quick-skip:hover:not(:disabled) {
+    background: var(--pk-color-purple);
+    color: #ffffff;
+    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4);
+    transform: translateY(-1px);
+}
+
+.pk-action-skip:active:not(:disabled),
+#pk-btn-quick-skip:active:not(:disabled) {
+    transform: translateY(0);
+    filter: brightness(0.9);
+}
+
+/* Button 4: [🔄 Thử lại] - Cyan / Teal Refresh */
+.pk-action-retry,
+#pk-btn-quick-retry {
+    background: var(--pk-color-cyan-bg);
+    border-color: var(--pk-color-cyan);
+    color: var(--pk-color-cyan);
+}
+
+.pk-action-retry:hover:not(:disabled),
+#pk-btn-quick-retry:hover:not(:disabled) {
+    background: var(--pk-color-cyan);
+    color: #0d1117;
+    box-shadow: 0 4px 12px rgba(0, 206, 201, 0.4);
+    transform: translateY(-1px);
+}
+
+.pk-action-retry:active:not(:disabled),
+#pk-btn-quick-retry:active:not(:disabled) {
+    transform: translateY(0);
+    filter: brightness(0.9);
+}
+
+/* Button 5: [🛒 Đến Giỏ hàng] - Blue Accent */
+.pk-action-cart,
+#pk-btn-quick-cart {
+    background: var(--pk-color-info-bg);
+    border-color: var(--pk-color-info);
+    color: var(--pk-color-info);
+}
+
+.pk-action-cart:hover:not(:disabled),
+#pk-btn-quick-cart:hover:not(:disabled) {
+    background: var(--pk-color-info);
+    color: #ffffff;
+    box-shadow: 0 4px 12px rgba(88, 166, 255, 0.4);
+    transform: translateY(-1px);
+}
+
+.pk-action-cart:active:not(:disabled),
+#pk-btn-quick-cart:active:not(:disabled) {
+    transform: translateY(0);
+    filter: brightness(0.9);
+}
+
+/* Disabled & Inactive States for Quick Action Buttons */
+.pk-quick-action-btn:disabled,
+.pk-quick-btn:disabled,
+.pk-quick-action-btn.disabled,
+.pk-quick-btn.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none !important;
+    box-shadow: none !important;
+    pointer-events: none;
+    filter: grayscale(0.5);
+}
+
+/* Focus Visibility */
+.pk-quick-action-btn:focus-visible,
+.pk-quick-btn:focus-visible {
+    outline: 2px solid #58a6ff;
+    outline-offset: 1px;
+}
+
+/* --------------------------------------------------------------------------
+   5. Security & Alert Banner (Feature F-27)
+   Volterra WAF (F5 XC), Google reCAPTCHA Enterprise, Two-Factor MFA Challenges
+   -------------------------------------------------------------------------- */
+#pk-security-alert-banner,
+.pk-security-alert-banner,
+#pk-security-barrier-banner,
+.pk-security-barrier-banner,
+#pk-security-alert-box,
+.pk-security-alert-box {
+    background: rgba(255, 71, 87, 0.12);
+    border: 2px solid var(--pk-color-error);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin: 8px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    color: #f0f6fc;
+    box-shadow: 0 0 16px rgba(255, 71, 87, 0.35), inset 0 0 12px rgba(255, 71, 87, 0.15);
+    animation: pkSecurityAlertPulse 2s ease-in-out infinite;
+    position: relative;
+    z-index: 10;
+}
+
+#pk-security-alert-banner,
+#pk-security-barrier-banner {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10000000;
+    max-width: 600px;
+    width: calc(100% - 40px);
+}
+
+/* Alert Type Variations */
+.pk-security-alert-box.pk-alert-waf,
+.pk-alert-type-waf {
+    border-color: #ff4757;
+    background: rgba(255, 71, 87, 0.15);
+}
+
+.pk-security-alert-box.pk-alert-recaptcha,
+.pk-alert-type-recaptcha {
+    border-color: #ffa502;
+    background: rgba(255, 165, 2, 0.15);
+    box-shadow: 0 0 16px rgba(255, 165, 2, 0.35), inset 0 0 12px rgba(255, 165, 2, 0.15);
+    animation: pkSecurityAlertPulseAmber 2s ease-in-out infinite;
+}
+
+.pk-security-alert-box.pk-alert-mfa,
+.pk-alert-type-mfa {
+    border-color: #70a1ff;
+    background: rgba(112, 161, 255, 0.15);
+    box-shadow: 0 0 16px rgba(112, 161, 255, 0.35), inset 0 0 12px rgba(112, 161, 255, 0.15);
+    animation: pkSecurityAlertPulseBlue 2s ease-in-out infinite;
+}
+
+.pk-security-alert-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: 700;
+    font-size: 13px;
+    gap: 8px;
+}
+
+.pk-alert-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #ff6b81;
+}
+
+.pk-security-alert-box.pk-alert-recaptcha .pk-alert-title {
+    color: #ffa502;
+}
+
+.pk-security-alert-box.pk-alert-mfa .pk-alert-title {
+    color: #70a1ff;
+}
+
+.pk-alert-hazard-icon {
+    display: inline-block;
+    font-size: 16px;
+    animation: pkAlertIconShake 1.2s infinite;
+}
+
+.pk-security-alert-msg,
+.pk-alert-desc {
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: #e6edf3;
+}
+
+.pk-security-alert-actions,
+.pk-alert-btn-group {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+    flex-wrap: wrap;
+}
+
+/* Banner Action Buttons */
+.pk-btn-solve-captcha,
+#pk-btn-solve-captcha {
+    flex: 1;
+    min-width: 140px;
+    padding: 7px 12px;
+    background: linear-gradient(135deg, #ffa502, #ff7f50);
+    border: none;
+    border-radius: 6px;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 11.5px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(255, 165, 2, 0.35);
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.pk-btn-solve-captcha:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(255, 165, 2, 0.5);
+    filter: brightness(1.1);
+}
+
+.pk-btn-resume-after-alert,
+#pk-btn-resume-after-alert {
+    flex: 1;
+    min-width: 140px;
+    padding: 7px 12px;
+    background: linear-gradient(135deg, #2ed573, #10ac84);
+    border: none;
+    border-radius: 6px;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 11.5px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(46, 213, 115, 0.35);
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.pk-btn-resume-after-alert:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(46, 213, 115, 0.5);
+    filter: brightness(1.1);
+}
+
+.pk-btn-dismiss-alert {
+    padding: 7px 10px;
+    background: transparent;
+    border: 1px solid var(--pk-border-muted);
+    border-radius: 6px;
+    color: var(--pk-text-secondary);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.pk-btn-dismiss-alert:hover {
+    background: var(--pk-bg-secondary);
+    color: var(--pk-text-primary);
+}
+
+/* --------------------------------------------------------------------------
+   6. Color-Coded Log Table & Console (Features F-24 & F-25)
+   Distinct accessible color badges:
+     - [INFO]: Blue / Cyan (#58a6ff / #00cec9)
+     - [SUCCESS]: Green (#2ed573)
+     - [WARN] / [WARNING]: Amber / Gold (#ffa502)
+     - [ERROR]: Red / Crimson (#ff4757)
+   Custom dark-mode scrollbars & Log action controls
+   -------------------------------------------------------------------------- */
+.pk-logs-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 6px;
+    margin-bottom: 4px;
+    padding: 0 2px;
+}
+
+.pk-logs-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--pk-text-secondary);
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.pk-logs-actions,
+.pk-log-controls {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.pk-logs-btn,
+.pk-log-btn {
+    background: var(--pk-bg-secondary);
+    border: 1px solid var(--pk-border-muted);
+    border-radius: 6px;
+    color: #c9d1d9;
+    font-size: 11px;
+    padding: 3px 8px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    user-select: none;
+}
+
+.pk-logs-btn:hover,
+.pk-log-btn:hover {
+    background: var(--pk-bg-tertiary);
+    color: #ffffff;
+    border-color: #58a6ff;
+}
+
+/* Dedicated Clear Logs Button Styling */
+#pk-btn-clear-logs,
+.pk-btn-clear-logs {
+    background: rgba(255, 71, 87, 0.12);
+    border-color: rgba(255, 71, 87, 0.35);
+    color: #ff6b81;
+}
+
+#pk-btn-clear-logs:hover,
+.pk-btn-clear-logs:hover {
+    background: #ff4757;
+    border-color: #ff4757;
+    color: #ffffff;
+    box-shadow: 0 2px 8px rgba(255, 71, 87, 0.4);
+}
+
+/* Dedicated Download / Export Logs Button Styling */
+#pk-btn-download-logs,
+.pk-btn-download-logs {
+    background: rgba(56, 139, 253, 0.12);
+    border-color: rgba(56, 139, 253, 0.35);
+    color: #58a6ff;
+}
+
+#pk-btn-download-logs:hover,
+.pk-btn-download-logs:hover {
+    background: #1f6feb;
+    border-color: #58a6ff;
+    color: #ffffff;
+    box-shadow: 0 2px 8px rgba(88, 166, 255, 0.4);
+}
+
+/* Dedicated Minimize / Maximize / Toggle Collapse Button */
+#pk-btn-toggle-collapse,
+.pk-btn-toggle-collapse,
+.pk-btn-expand-logs {
+    background: var(--pk-bg-secondary);
+    border-color: var(--pk-border-muted);
+    color: #c9d1d9;
+}
+
+#pk-btn-toggle-collapse:hover,
+.pk-btn-toggle-collapse:hover,
+.pk-btn-expand-logs:hover {
+    background: #30363d;
+    color: #ffffff;
+}
+
+/* Scrollable Log Container & Log Console */
+#pk-bot-logs,
+.pk-log-container,
+.pk-log-table-wrapper {
+    background: #0d1117;
+    border: 1px solid var(--pk-border-muted);
+    border-radius: 8px;
+    padding: 8px 10px;
+    height: 200px;
+    min-height: 120px;
+    max-height: 600px;
+    resize: vertical;
+    overflow-y: auto;
+    font-family: var(--pk-font-mono);
+    font-size: 11.5px;
+    line-height: 1.6;
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+#pk-auto-bot-container.pk-expanded #pk-bot-logs {
+    height: 440px;
+    font-size: 12.5px;
+}
+
+/* Structured Log Table Component */
+.pk-log-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--pk-font-mono);
+    font-size: 11.5px;
+}
+
+.pk-log-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 3px 4px;
+    border-bottom: 1px solid rgba(48, 54, 61, 0.4);
+    transition: background 0.15s ease;
+    word-break: break-word;
+}
+
+.pk-log-row:last-child {
+    border-bottom: none;
+}
+
+.pk-log-row:hover {
+    background: rgba(110, 118, 129, 0.08);
+}
+
+/* Log Badges */
+.pk-log-badge,
+.pk-log-level {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+    min-width: 58px;
+    text-align: center;
+    line-height: 1.4;
+}
+
+/* Badge 1: [INFO] - Blue / Cyan */
+.pk-log-badge.info,
+.pk-log-badge[data-level="info"],
+.pk-log-badge-info {
+    background: var(--pk-color-info-bg);
+    color: var(--pk-color-info);
+    border: 1px solid var(--pk-color-info-border);
+}
+
+.pk-log-badge.cyan,
+.pk-log-badge[data-level="cyan"] {
+    background: var(--pk-color-cyan-bg);
+    color: var(--pk-color-cyan);
+    border: 1px solid rgba(0, 206, 201, 0.35);
+}
+
+/* Badge 2: [SUCCESS] - Green */
+.pk-log-badge.success,
+.pk-log-badge[data-level="success"],
+.pk-log-badge-success {
+    background: var(--pk-color-success-bg);
+    color: var(--pk-color-success);
+    border: 1px solid var(--pk-color-success-border);
+}
+
+/* Badge 3: [WARN] / [WARNING] - Amber / Gold */
+.pk-log-badge.warn,
+.pk-log-badge.warning,
+.pk-log-badge[data-level="warn"],
+.pk-log-badge[data-level="warning"],
+.pk-log-badge-warn {
+    background: var(--pk-color-warn-bg);
+    color: var(--pk-color-warn);
+    border: 1px solid var(--pk-color-warn-border);
+}
+
+/* Badge 4: [ERROR] - Red / Crimson */
+.pk-log-badge.error,
+.pk-log-badge.err,
+.pk-log-badge[data-level="error"],
+.pk-log-badge[data-level="err"],
+.pk-log-badge-error {
+    background: var(--pk-color-error-bg);
+    color: var(--pk-color-error);
+    border: 1px solid var(--pk-color-error-border);
+}
+
+/* Log Timestamp */
+.pk-log-timestamp,
+.pk-log-time {
+    color: var(--pk-text-muted);
+    margin-right: 4px;
+    font-weight: normal;
+    font-size: 11px;
+    flex-shrink: 0;
+    min-width: 50px;
+}
+
+/* Log Content Elements */
+.pk-log-msg,
+.pk-log-message {
+    flex: 1;
+    word-break: break-word;
+    color: #e6edf3;
+    line-height: 1.5;
+}
+
+.pk-log-line {
+    margin-bottom: 4px;
+    word-break: break-word;
+    white-space: pre-wrap;
+    line-height: 1.5;
+}
+
+.pk-log-info { color: #f0f6fc; }
+.pk-log-success { color: var(--pk-color-success); font-weight: 600; }
+.pk-log-warn, .pk-log-warning { color: var(--pk-color-warn); font-weight: 600; }
+.pk-log-err, .pk-log-error { color: var(--pk-color-error); font-weight: bold; }
+
+/* --------------------------------------------------------------------------
+   7. Form Controls, Toggles & Action Buttons
+   -------------------------------------------------------------------------- */
 .pk-row {
     display: flex;
     align-items: center;
@@ -165,7 +1090,7 @@
     color: #ced6e0;
 }
 
-/* Switch */
+/* Toggle Switch */
 .pk-switch {
     position: relative;
     display: inline-block;
@@ -187,7 +1112,7 @@
     right: 0;
     bottom: 0;
     background-color: #57606f;
-    transition: 0.3s;
+    transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     border-radius: 24px;
 }
 
@@ -199,19 +1124,20 @@
     left: 3px;
     bottom: 3px;
     background-color: white;
-    transition: 0.3s;
+    transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 input:checked + .pk-slider {
-    background-color: #2ed573;
+    background-color: var(--pk-color-success);
 }
 
 input:checked + .pk-slider:before {
     transform: translateX(20px);
 }
 
-/* Action button */
+/* Primary Action Buttons */
 .pk-btn-run {
     width: 100%;
     padding: 10px;
@@ -220,26 +1146,37 @@ input:checked + .pk-slider:before {
     border-radius: 8px;
     color: #fff;
     font-weight: 700;
-    font-size: 14px;
+    font-size: 13.5px;
     cursor: pointer;
     box-shadow: 0 4px 12px rgba(46, 213, 115, 0.3);
-    transition: all 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
 }
 
 .pk-btn-run:hover:not(:disabled) {
     transform: translateY(-1px);
-    box-shadow: 0 6px 16px rgba(46, 213, 115, 0.4);
+    box-shadow: 0 6px 16px rgba(46, 213, 115, 0.45);
+    filter: brightness(1.05);
+}
+
+.pk-btn-run:active:not(:disabled) {
+    transform: translateY(0);
 }
 
 .pk-btn-run:disabled {
     background: #57606f;
     cursor: not-allowed;
     box-shadow: none;
+    opacity: 0.6;
 }
 
-/* Status badge */
+/* Status Box */
 .pk-status-box {
-    background: #2f3542;
+    background: var(--pk-bg-secondary);
+    border: 1px solid var(--pk-border-muted);
     border-radius: 8px;
     padding: 8px 10px;
     font-size: 12px;
@@ -259,86 +1196,17 @@ input:checked + .pk-slider:before {
     font-weight: bold;
 }
 
-.pk-status-val.success { color: #2ed573; }
-.pk-status-val.warn { color: #ffa502; }
-.pk-status-val.info { color: #70a1ff; }
+.pk-status-val.success { color: var(--pk-color-success); }
+.pk-status-val.warn { color: var(--pk-color-warn); }
+.pk-status-val.info { color: var(--pk-color-info); }
+.pk-status-val.err { color: var(--pk-color-error); }
 
-/* Logs Header & Actions */
-.pk-logs-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-top: 4px;
-    margin-bottom: 4px;
-    padding: 0 2px;
-}
-
-.pk-logs-title {
-    font-size: 11px;
-    font-weight: 700;
-    color: #a4b0be;
-    letter-spacing: 0.5px;
-}
-
-.pk-logs-actions {
-    display: flex;
-    gap: 6px;
-}
-
-.pk-logs-btn {
-    background: #2f3542;
-    border: 1px solid #57606f;
-    border-radius: 4px;
-    color: #ced6e0;
-    font-size: 11px;
-    padding: 2px 8px;
-    cursor: pointer;
-    font-weight: 600;
-    transition: all 0.2s;
-}
-
-.pk-logs-btn:hover {
-    background: #57606f;
-    color: #fff;
-}
-
-/* Log Console */
-#pk-bot-logs {
-    background: #0f1015;
-    border: 1px solid #2f3542;
-    border-radius: 8px;
-    padding: 10px 12px;
-    height: 200px;
-    min-height: 120px;
-    max-height: 600px;
-    resize: vertical;
-    overflow-y: auto;
-    font-family: Consolas, "Courier New", monospace;
-    font-size: 12px;
-    line-height: 1.6;
-}
-
-#pk-auto-bot-container.pk-expanded #pk-bot-logs {
-    height: 440px;
-    font-size: 13px;
-}
-
-.pk-log-line {
-    margin-bottom: 4px;
-    word-break: break-word;
-    white-space: pre-wrap;
-}
-
-.pk-log-time { color: #747d8c; margin-right: 4px; font-weight: normal; }
-.pk-log-info { color: #f1f2f6; }
-.pk-log-success { color: #2ed573; font-weight: 600; }
-.pk-log-warn { color: #ffa502; font-weight: 600; }
-.pk-log-err { color: #ff4757; font-weight: bold; }
-
-/* Account Selector Box */
+/* --------------------------------------------------------------------------
+   8. Account Management & Modal Dialog
+   -------------------------------------------------------------------------- */
 .pk-acc-selector-box {
-    background: #23272e;
-    border: 1px solid #3e4451;
+    background: var(--pk-bg-secondary);
+    border: 1px solid var(--pk-border-muted);
     border-radius: 8px;
     padding: 8px 10px;
     display: flex;
@@ -355,10 +1223,10 @@ input:checked + .pk-slider:before {
 
 .pk-acc-select {
     flex: 1;
-    background: #1e1e24;
-    color: #2ed573;
+    background: var(--pk-bg-primary);
+    color: var(--pk-color-success);
     font-weight: bold;
-    border: 1px solid #4b5263;
+    border: 1px solid var(--pk-border-muted);
     border-radius: 6px;
     padding: 5px 8px;
     font-size: 11px;
@@ -395,8 +1263,8 @@ input:checked + .pk-slider:before {
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0, 0, 0, 0.7);
-    backdrop-filter: blur(3px);
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(4px);
     z-index: 10000000;
     display: flex;
     align-items: center;
@@ -410,12 +1278,12 @@ input:checked + .pk-slider:before {
     max-width: 95vw;
     max-height: 85vh;
     border-radius: 12px;
-    border: 1px solid #ff4757;
+    border: 1px solid var(--pk-color-accent);
     box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-family: var(--pk-font-sans);
     font-size: 13px;
 }
 
@@ -440,7 +1308,7 @@ input:checked + .pk-slider:before {
 
 .pk-acc-card {
     background: #2b303c;
-    border: 1px solid #3e4451;
+    border: 1px solid var(--pk-border-muted);
     border-radius: 8px;
     padding: 10px 12px;
     display: flex;
@@ -450,7 +1318,7 @@ input:checked + .pk-slider:before {
 }
 
 .pk-acc-card.active {
-    border-color: #2ed573;
+    border-color: var(--pk-color-success);
     background: #22352b;
 }
 
@@ -467,12 +1335,12 @@ input:checked + .pk-slider:before {
 
 .pk-acc-email {
     font-size: 11px;
-    color: #a4b0be;
+    color: var(--pk-text-secondary);
 }
 
 .pk-acc-otp-mail {
     font-size: 11px;
-    color: #70a1ff;
+    color: var(--pk-color-info);
 }
 
 .pk-acc-actions {
@@ -489,9 +1357,9 @@ input:checked + .pk-slider:before {
     font-weight: 600;
 }
 
-.pk-btn-select { background: #2ed573; color: #fff; }
-.pk-btn-edit { background: #ffa502; color: #fff; }
-.pk-btn-delete { background: #ff4757; color: #fff; }
+.pk-btn-select { background: var(--pk-color-success); color: #fff; }
+.pk-btn-edit { background: var(--pk-color-warn); color: #fff; }
+.pk-btn-delete { background: var(--pk-color-error); color: #fff; }
 
 .pk-form-group {
     display: flex;
@@ -508,7 +1376,7 @@ input:checked + .pk-slider:before {
 
 .pk-form-input {
     background: #14161b;
-    border: 1px solid #3e4451;
+    border: 1px solid var(--pk-border-muted);
     border-radius: 6px;
     padding: 7px 10px;
     color: #fff;
@@ -517,13 +1385,15 @@ input:checked + .pk-slider:before {
 }
 
 .pk-form-input:focus {
-    border-color: #2ed573;
+    border-color: var(--pk-color-success);
 }
 
-/* Product Selection Box */
+/* --------------------------------------------------------------------------
+   9. Product Selection & Lottery Checklist
+   -------------------------------------------------------------------------- */
 #pk-product-selection-box {
     background: #14161d;
-    border: 1px solid #2f3542;
+    border: 1px solid var(--pk-border-muted);
     border-radius: 8px;
     padding: 10px;
     display: flex;
@@ -544,7 +1414,7 @@ input:checked + .pk-slider:before {
 .pk-selection-title {
     font-size: 11px;
     font-weight: 700;
-    color: #2ed573;
+    color: var(--pk-color-success);
     display: flex;
     align-items: center;
     gap: 4px;
@@ -562,7 +1432,7 @@ input:checked + .pk-slider:before {
     gap: 8px;
     padding: 8px 10px;
     background: #1e2029;
-    border: 1px solid #2f3542;
+    border: 1px solid var(--pk-border-muted);
     border-radius: 6px;
     cursor: pointer;
     transition: all 0.2s;
@@ -576,7 +1446,7 @@ input:checked + .pk-slider:before {
 
 .pk-item-check-row.selected {
     background: #192720;
-    border-color: #2ed573;
+    border-color: var(--pk-color-success);
 }
 
 .pk-item-check-row.applied {
@@ -590,7 +1460,7 @@ input:checked + .pk-slider:before {
     margin-top: 3px;
     width: 16px;
     height: 16px;
-    accent-color: #2ed573;
+    accent-color: var(--pk-color-success);
     cursor: pointer;
 }
 
@@ -610,7 +1480,7 @@ input:checked + .pk-slider:before {
 
 .pk-item-meta {
     font-size: 10.5px;
-    color: #a4b0be;
+    color: var(--pk-text-secondary);
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -626,8 +1496,8 @@ input:checked + .pk-slider:before {
 
 .pk-item-badge.badge-open {
     background: rgba(46, 213, 115, 0.2);
-    color: #2ed573;
-    border: 1px solid #2ed573;
+    color: var(--pk-color-success);
+    border: 1px solid var(--pk-color-success);
 }
 
 .pk-item-badge.badge-applied {
@@ -643,20 +1513,19 @@ input:checked + .pk-slider:before {
 
 .pk-item-badge.badge-frame-unverified {
     background: rgba(46, 213, 115, 0.15);
-    color: #2ed573;
+    color: var(--pk-color-success);
     border: 1px solid rgba(46, 213, 115, 0.35);
 }
 
 .pk-item-badge.badge-frame-verified {
     background: rgba(255, 165, 2, 0.15);
-    color: #ffa502;
+    color: var(--pk-color-warn);
     border: 1px solid rgba(255, 165, 2, 0.35);
 }
 
-/* =========================================================================
-   PROFILE TRUST SCORE & ANTI-BOT AUDIT STYLES
-   ========================================================================= */
-
+/* --------------------------------------------------------------------------
+   10. Profile Trust Score & Anti-Bot Audit Styles & Modal
+   -------------------------------------------------------------------------- */
 .pk-trust-box {
     background: #252a36;
     border: 1px solid #3e4451;
@@ -701,32 +1570,27 @@ input:checked + .pk-slider:before {
 
 .pk-trust-badge.loading {
     background: rgba(164, 176, 190, 0.2);
-    color: #a4b0be;
+    color: var(--pk-text-secondary);
     border: 1px solid #57606f;
 }
 
 .pk-trust-badge.excellent {
     background: rgba(46, 213, 115, 0.2);
-    color: #2ed573;
-    border: 1px solid #2ed573;
+    color: var(--pk-color-success);
+    border: 1px solid var(--pk-color-success);
 }
 
 .pk-trust-badge.warning {
     background: rgba(255, 165, 2, 0.2);
-    color: #ffa502;
-    border: 1px solid #ffa502;
+    color: var(--pk-color-warn);
+    border: 1px solid var(--pk-color-warn);
 }
 
 .pk-trust-badge.danger {
     background: rgba(255, 71, 87, 0.2);
-    color: #ff4757;
-    border: 1px solid #ff4757;
+    color: var(--pk-color-error);
+    border: 1px solid var(--pk-color-error);
     animation: pkPulse 2s infinite;
-}
-
-@keyframes pkPulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.6; }
 }
 
 .pk-trust-meter-container {
@@ -804,7 +1668,8 @@ input:checked + .pk-slider:before {
 }
 
 /* Overlay Modal Chấm Điểm */
-#pk-audit-modal-overlay, .pk-modal-overlay {
+#pk-audit-modal-overlay,
+.pk-modal-overlay {
     position: fixed !important;
     top: 0 !important;
     left: 0 !important;
@@ -887,17 +1752,17 @@ input:checked + .pk-slider:before {
 }
 
 .pk-audit-item-row.fail {
-    border-left: 4px solid #ff4757;
+    border-left: 4px solid var(--pk-color-error);
     background: rgba(255, 71, 87, 0.06);
 }
 
 .pk-audit-item-row.warn {
-    border-left: 4px solid #ffa502;
+    border-left: 4px solid var(--pk-color-warn);
     background: rgba(255, 165, 2, 0.05);
 }
 
 .pk-audit-item-row.pass {
-    border-left: 4px solid #2ed573;
+    border-left: 4px solid var(--pk-color-success);
     background: rgba(46, 213, 115, 0.05);
 }
 
@@ -923,13 +1788,13 @@ input:checked + .pk-slider:before {
 
 .pk-audit-item-detail {
     font-size: 11.5px;
-    color: #a4b0be;
+    color: var(--pk-text-secondary);
     line-height: 1.4;
 }
 
 .pk-audit-item-tip {
     font-size: 11px;
-    color: #ffa502;
+    color: var(--pk-color-warn);
     background: rgba(255, 165, 2, 0.1);
     border: 1px dashed rgba(255, 165, 2, 0.4);
     border-radius: 5px;
@@ -938,3 +1803,183 @@ input:checked + .pk-slider:before {
     line-height: 1.35;
 }
 
+/* --------------------------------------------------------------------------
+   11. Dark-Mode Custom Scrollbars & Animation Keyframes
+   -------------------------------------------------------------------------- */
+/* Dark Scrollbar for Widget & Log Console */
+#pk-auto-bot-container *::-webkit-scrollbar,
+#pk-bot-logs::-webkit-scrollbar,
+.pk-log-table-wrapper::-webkit-scrollbar,
+.pk-log-container::-webkit-scrollbar,
+#pk-bot-body::-webkit-scrollbar,
+#pk-product-selection-box::-webkit-scrollbar,
+#pk-acc-modal-body::-webkit-scrollbar,
+.pk-audit-modal-body::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+#pk-auto-bot-container *::-webkit-scrollbar-track,
+#pk-bot-logs::-webkit-scrollbar-track,
+.pk-log-table-wrapper::-webkit-scrollbar-track,
+.pk-log-container::-webkit-scrollbar-track,
+#pk-bot-body::-webkit-scrollbar-track,
+#pk-product-selection-box::-webkit-scrollbar-track,
+#pk-acc-modal-body::-webkit-scrollbar-track,
+.pk-audit-modal-body::-webkit-scrollbar-track {
+    background: #0d1117;
+    border-radius: 3px;
+}
+
+#pk-auto-bot-container *::-webkit-scrollbar-thumb,
+#pk-bot-logs::-webkit-scrollbar-thumb,
+.pk-log-table-wrapper::-webkit-scrollbar-thumb,
+.pk-log-container::-webkit-scrollbar-thumb,
+#pk-bot-body::-webkit-scrollbar-thumb,
+#pk-product-selection-box::-webkit-scrollbar-thumb,
+#pk-acc-modal-body::-webkit-scrollbar-thumb,
+.pk-audit-modal-body::-webkit-scrollbar-thumb {
+    background: #30363d;
+    border-radius: 3px;
+}
+
+#pk-auto-bot-container *::-webkit-scrollbar-thumb:hover,
+#pk-bot-logs::-webkit-scrollbar-thumb:hover,
+.pk-log-table-wrapper::-webkit-scrollbar-thumb:hover,
+.pk-log-container::-webkit-scrollbar-thumb:hover,
+#pk-bot-body::-webkit-scrollbar-thumb:hover {
+    background: #58a6ff;
+}
+
+/* Firefox scrollbar standard */
+#pk-bot-logs,
+.pk-log-table-wrapper,
+.pk-log-container,
+#pk-bot-body,
+#pk-product-selection-box,
+#pk-acc-modal-body,
+.pk-audit-modal-body {
+    scrollbar-width: thin;
+    scrollbar-color: #30363d #0d1117;
+}
+
+/* Animations */
+@keyframes pkStepPulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(88, 166, 255, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 8px rgba(88, 166, 255, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(88, 166, 255, 0);
+    }
+}
+
+@keyframes pkStepPulseAmber {
+    0% {
+        box-shadow: 0 0 0 0 rgba(255, 165, 2, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 8px rgba(255, 165, 2, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(255, 165, 2, 0);
+    }
+}
+
+@keyframes pkStepPulseError {
+    0% {
+        box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.75);
+    }
+    70% {
+        box-shadow: 0 0 0 8px rgba(255, 71, 87, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(255, 71, 87, 0);
+    }
+}
+
+@keyframes pkSegmentPulse {
+    0%, 100% {
+        background: #1f6feb;
+        box-shadow: 0 0 6px rgba(88, 166, 255, 0.6);
+    }
+    50% {
+        background: #58a6ff;
+        box-shadow: 0 0 12px rgba(88, 166, 255, 0.9);
+    }
+}
+
+@keyframes pkSegmentPulseAmber {
+    0%, 100% {
+        background: #d29922;
+        box-shadow: 0 0 6px rgba(255, 165, 2, 0.6);
+    }
+    50% {
+        background: #ffa502;
+        box-shadow: 0 0 12px rgba(255, 165, 2, 0.9);
+    }
+}
+
+@keyframes pkSegmentPulseError {
+    0%, 100% {
+        background: #da3633;
+        box-shadow: 0 0 6px rgba(255, 71, 87, 0.6);
+    }
+    50% {
+        background: #ff4757;
+        box-shadow: 0 0 14px rgba(255, 71, 87, 0.95);
+    }
+}
+
+@keyframes pkSecurityAlertPulse {
+    0%, 100% {
+        border-color: #ff4757;
+        box-shadow: 0 0 16px rgba(255, 71, 87, 0.35), inset 0 0 10px rgba(255, 71, 87, 0.15);
+    }
+    50% {
+        border-color: #ff6b81;
+        box-shadow: 0 0 24px rgba(255, 71, 87, 0.6), inset 0 0 16px rgba(255, 71, 87, 0.25);
+    }
+}
+
+@keyframes pkSecurityAlertPulseAmber {
+    0%, 100% {
+        border-color: #ffa502;
+        box-shadow: 0 0 16px rgba(255, 165, 2, 0.35), inset 0 0 10px rgba(255, 165, 2, 0.15);
+    }
+    50% {
+        border-color: #ffc048;
+        box-shadow: 0 0 24px rgba(255, 165, 2, 0.6), inset 0 0 16px rgba(255, 165, 2, 0.25);
+    }
+}
+
+@keyframes pkSecurityAlertPulseBlue {
+    0%, 100% {
+        border-color: #70a1ff;
+        box-shadow: 0 0 16px rgba(112, 161, 255, 0.35), inset 0 0 10px rgba(112, 161, 255, 0.15);
+    }
+    50% {
+        border-color: #1e90ff;
+        box-shadow: 0 0 24px rgba(112, 161, 255, 0.6), inset 0 0 16px rgba(112, 161, 255, 0.25);
+    }
+}
+
+@keyframes pkAlertIconShake {
+    0%, 100% { transform: rotate(0deg); }
+    20% { transform: rotate(-10deg); }
+    40% { transform: rotate(10deg); }
+    60% { transform: rotate(-6deg); }
+    80% { transform: rotate(6deg); }
+}
+
+@keyframes pkPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+@keyframes pkFadeIn {
+    from { opacity: 0; transform: scale(0.96); }
+    to { opacity: 1; transform: scale(1); }
+}

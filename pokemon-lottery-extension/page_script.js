@@ -12,27 +12,484 @@
         monitorIntervalMin: 10,     // Chu kỳ tự động kiểm tra lại (phút)
     };
 
-    // Quản lý trạng thái tài khoản
+    // Quản lý trạng thái tài khoản & FSM
     const STATE = {
         accounts: [],
         activeAccountId: null,
         isFetchingOtp: false,
-        pollTimer: null
+        pollTimer: null,
+        fsmState: 'STATE_IDLE',
+        currentStep: 1,
+        isPaused: false,
+        securityBlocked: false
     };
 
-    // Helper ghi log lên widget
+    // Buffer lưu trữ lịch sử nhật ký (tối đa 500 bản ghi)
+    const LOG_HISTORY = [];
+
+    // Helper ghi log lên widget và phát sóng qua Storage Bridge tới content.js
     function addLog(text, type = "info") {
         const time = new Date().toLocaleTimeString();
+        const logEntry = { level: type, message: text, timestamp: Date.now(), timeStr: time };
+        LOG_HISTORY.push(logEntry);
+        if (LOG_HISTORY.length > 500) LOG_HISTORY.shift();
+
         console.log(`[PK-BOT] [${time}] [${type}] ${text}`);
         const logBox = document.getElementById("pk-bot-logs");
         if (logBox) {
             const div = document.createElement("div");
             div.className = `pk-log-line pk-log-${type}`;
-            div.innerHTML = `<span class="pk-log-time">[${time}]</span> ${text}`;
+            const timeSpan = document.createElement("span");
+            timeSpan.className = "pk-log-time";
+            timeSpan.textContent = `[${time}] `;
+            div.appendChild(timeSpan);
+            div.appendChild(document.createTextNode(text));
             logBox.appendChild(div);
             logBox.scrollTop = logBox.scrollHeight;
         }
+
+        // Broadcast log message to content script via window.postMessage
+        try {
+            window.postMessage({
+                type: "PK_BOT_LOG",
+                payload: { level: type, message: text, timestamp: Date.now() }
+            }, "*");
+        } catch (e) {}
     }
+
+    // =========================================================================
+    // MÁY TRẠNG THÁI HỮU HẠN (FINITE STATE MACHINE - FSM)
+    // =========================================================================
+    const FSM_STATES = {
+        IDLE: 'STATE_IDLE',
+        LOGIN_IN_PROGRESS: 'STATE_LOGIN_IN_PROGRESS',
+        MFA_PENDING: 'STATE_MFA_PENDING',
+        LOTTERY_SCANNING: 'STATE_LOTTERY_SCANNING',
+        QUEUE_PROCESSING: 'STATE_QUEUE_PROCESSING',
+        PRODUCT_NAVIGATING: 'STATE_PRODUCT_NAVIGATING',
+        CART_REVIEW: 'STATE_CART_REVIEW',
+        CHECKOUT_SHIPPING: 'STATE_CHECKOUT_SHIPPING',
+        CHECKOUT_PAYMENT: 'STATE_CHECKOUT_PAYMENT',
+        CHECKOUT_PLACE_ORDER: 'STATE_CHECKOUT_PLACE_ORDER',
+        ORDER_CONFIRMED: 'STATE_ORDER_CONFIRMED',
+        SECURITY_BLOCKED: 'STATE_SECURITY_BLOCKED',
+        ERROR_PAUSED: 'STATE_ERROR_PAUSED'
+    };
+
+    let currentStepperIndex = 1;
+    let fsmPreviousState = null;
+
+    // Bộ phát âm thanh cảnh báo bảo mật qua Web Audio API synthesizer
+    function playSecurityAlertAudio() {
+        try {
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContextClass) return;
+            const ctx = new AudioContextClass();
+            if (ctx.state === 'suspended') {
+                ctx.resume();
+            }
+            const now = ctx.currentTime;
+            // 3 hồi bíp cảnh báo ở tần số 880Hz (A5)
+            for (let i = 0; i < 3; i++) {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(880, now + i * 0.25);
+                gain.gain.setValueAtTime(0.3, now + i * 0.25);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.25 + 0.18);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(now + i * 0.25);
+                osc.stop(now + i * 0.25 + 0.2);
+            }
+        } catch (e) {
+            console.warn("[PK-BOT] Không thể phát âm thanh cảnh báo Web Audio:", e);
+        }
+    }
+
+    // Hiển thị hộp thông báo cảnh báo bảo mật nổi bật trên trang
+    function showSecurityAlertBanner(title, message) {
+        let banner = document.getElementById("pk-security-alert-banner") || document.getElementById("pk-security-barrier-banner");
+        if (!banner) {
+            banner = document.createElement("div");
+            banner.id = "pk-security-alert-banner";
+            banner.className = "pk-security-alert-box pk-security-alert-banner";
+            banner.style.cssText = "position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:10000000;font-family:sans-serif;display:flex;flex-direction:column;gap:8px;max-width:600px;text-align:left;";
+            document.body.appendChild(banner);
+        } else {
+            banner.className = "pk-security-alert-box pk-security-alert-banner";
+        }
+        banner.innerHTML = `
+            <div style="display:flex;align-items:center;gap:10px;font-weight:bold;font-size:15px;">
+                <span style="font-size:22px;">🚨</span>
+                <span>${title}</span>
+            </div>
+            <div style="font-size:13px;line-height:1.5;color:#ffeaa7;">${message}</div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:6px;">
+                <button id="pk-btn-resume-after-captcha" style="background:#2ed573;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:12px;">
+                    ▶ Tiếp tục sau khi giải xong
+                </button>
+            </div>
+        `;
+        const resumeBtn = document.getElementById("pk-btn-resume-after-captcha");
+        if (resumeBtn) {
+            resumeBtn.onclick = () => {
+                banner.remove();
+                if (typeof fsm !== 'undefined') fsm.resume();
+            };
+        }
+    }
+
+    // Xử lý khi phát hiện rào cản bảo mật (WAF / reCAPTCHA)
+    let SECURITY_BARRIER_TRIGGERED = false;
+    function handleSecurityBarrierDetected(type, detail) {
+        if (SECURITY_BARRIER_TRIGGERED) return;
+        SECURITY_BARRIER_TRIGGERED = true;
+
+        if (typeof fsm !== 'undefined') {
+            fsm.transition(FSM_STATES.SECURITY_BLOCKED);
+        }
+        playSecurityAlertAudio();
+
+        if (type === 'VOLTERRA_WAF') {
+            addLog(`🚨 PHÁT HIỆN RÀO CẢN BẢO MẬT F5 VOLTERRA WAF (HTTP 403)! (${detail})`, "err");
+            addLog("🛑 Dừng khẩn cấp toàn bộ auto-click để tránh bị khóa IP / Blacklist tài khoản!", "err");
+            showSecurityAlertBanner(
+                "PHÁT HIỆN RÀO CẢN BẢO MẬT VOLTERRA WAF (HTTP 403)",
+                "Máy chủ Pokémon Center hoặc Gigya trả về HTTP 403 Forbidden với chữ ký F5 Volterra WAF (server: volt-adc / x-volterra-location). Bot đã lập tức dừng lại để bảo vệ tài khoản của bạn."
+            );
+        } else if (type === 'RECAPTCHA_ENTERPRISE') {
+            addLog(`⚠️ PHÁT HIỆN THỬ THÁCH GOOGLE reCAPTCHA ENTERPRISE! (${detail})`, "err");
+            addLog("🛑 Vui lòng thao tác giải CAPTCHA thủ công trên màn hình.", "warn");
+            showSecurityAlertBanner(
+                "PHÁT HIỆN THỬ THÁCH reCAPTCHA ENTERPRISE",
+                "Website yêu cầu xác thực người thật reCAPTCHA Enterprise (#errorecpcature hoặc iframe reCAPTCHA). Vui lòng hoàn thành xác thực trên màn hình rồi bấm nút [Tiếp tục]."
+            );
+        }
+    }
+
+    // Quét DOM tìm kiếm các dấu hiệu rào cản bảo mật
+    function scanDomForSecurityBarriers() {
+        if (SECURITY_BARRIER_TRIGGERED) return;
+
+        // 1. reCAPTCHA iframe hoặc thẻ lỗi reCAPTCHA của Gigya
+        const recaptchaIframe = document.querySelector('iframe[src*="recaptcha"], iframe[title*="reCAPTCHA"], .g-recaptcha, .recaptcha-checkbox');
+        const recaptchaError = document.getElementById('errorecpcature');
+        if (recaptchaIframe && (recaptchaIframe.offsetWidth > 0 || recaptchaIframe.offsetHeight > 0)) {
+            handleSecurityBarrierDetected('RECAPTCHA_ENTERPRISE', 'reCAPTCHA challenge iframe visible');
+            return;
+        }
+        if (recaptchaError && recaptchaError.style.display !== 'none' && (recaptchaError.textContent || '').includes('reCAPTCHA')) {
+            handleSecurityBarrierDetected('RECAPTCHA_ENTERPRISE', '#errorecpcature text: ' + recaptchaError.textContent.trim());
+            return;
+        }
+
+        // 2. Tài khoản bị tạm khóa
+        const lockError = document.getElementById('erroLock');
+        if (lockError && lockError.style.display !== 'none' && (lockError.textContent || '').trim().length > 0) {
+            addLog(`⚠️ CẢNH BÁO TÀI KHOẢN: ${lockError.textContent.trim()}`, "err");
+        }
+
+        // 3. WAF Block page text
+        const bodyText = document.body ? (document.body.innerText || '') : '';
+        if (bodyText.includes('volt-adc') || (bodyText.includes('The requested URL was rejected') && bodyText.includes('support ID'))) {
+            handleSecurityBarrierDetected('VOLTERRA_WAF', 'Volterra error page text signature');
+            return;
+        }
+    }
+
+    // Intercept network requests (fetch & XHR) để phát hiện HTTP 403 F5 Volterra WAF
+    let NETWORK_INTERCEPTOR_INSTALLED = false;
+    function installNetworkSecurityInterceptor() {
+        if (NETWORK_INTERCEPTOR_INSTALLED) return;
+        NETWORK_INTERCEPTOR_INSTALLED = true;
+
+        // Hook window.fetch
+        const origFetch = window.fetch;
+        if (typeof origFetch === 'function') {
+            window.fetch = async function(...args) {
+                try {
+                    const response = await origFetch.apply(this, args);
+                    if (response && response.status === 403) {
+                        const serverHdr = response.headers ? (response.headers.get('server') || '') : '';
+                        const voltLoc = response.headers ? (response.headers.get('x-volterra-location') || '') : '';
+                        const reqUrl = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url ? args[0].url : '');
+                        if (serverHdr.includes('volt-adc') || voltLoc || reqUrl.includes('accounts.login')) {
+                            handleSecurityBarrierDetected('VOLTERRA_WAF', `fetch 403 on ${reqUrl} (server: ${serverHdr})`);
+                        }
+                    }
+                    return response;
+                } catch (err) {
+                    throw err;
+                }
+            };
+        }
+
+        // Hook XMLHttpRequest
+        const origOpen = XMLHttpRequest.prototype.open;
+        const origSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function(method, url) {
+            this.__pk_req_url = url;
+            return origOpen.apply(this, arguments);
+        };
+        XMLHttpRequest.prototype.send = function() {
+            this.addEventListener('load', function() {
+                if (this.status === 403) {
+                    let serverHdr = '';
+                    let voltLoc = '';
+                    try { serverHdr = this.getResponseHeader('server') || ''; } catch (e) {}
+                    try { voltLoc = this.getResponseHeader('x-volterra-location') || ''; } catch (e) {}
+                    const reqUrl = this.__pk_req_url || '';
+                    if (serverHdr.includes('volt-adc') || voltLoc || reqUrl.includes('accounts.login')) {
+                        handleSecurityBarrierDetected('VOLTERRA_WAF', `XHR 403 on ${reqUrl} (server: ${serverHdr})`);
+                    }
+                }
+            });
+            return origSend.apply(this, arguments);
+        };
+    }
+
+    // Giao tiếp qua Storage Bridge (PostMessage tới content.js)
+    function syncStorageBridge(key, value) {
+        try {
+            window.postMessage({
+                type: "PK_BOT_STORAGE_SET",
+                payload: { key, value }
+            }, "*");
+        } catch (e) {}
+    }
+
+    function broadcastStateUpdate() {
+        try {
+            const stateName = fsm ? fsm.currentState : 'STATE_IDLE';
+            const queue = JSON.parse(localStorage.getItem("pk_winning_queue") || "[]");
+            const activeAcc = STATE.activeAccountId || localStorage.getItem("pk_active_account_id") || '';
+            const step = currentStepperIndex || 1;
+
+            window.postMessage({
+                type: "PK_BOT_STATE_UPDATE",
+                payload: {
+                    state: stateName,
+                    step: step,
+                    queue: queue,
+                    activeAccount: activeAcc
+                }
+            }, "*");
+        } catch (e) {}
+    }
+
+    // Cập nhật giao diện Stepper 6 bước
+    function updateStepperUI(stepIndex, isCompleted = false) {
+        currentStepperIndex = stepIndex;
+        const stepLabels = [
+            "1. Đăng nhập",
+            "2. Quét kết quả",
+            "3. Đặt trước/Giỏ hàng",
+            "4. Địa chỉ",
+            "5. Thanh toán",
+            "6. Chốt đơn"
+        ];
+        // Cập nhật text trên widget nếu có
+        const stepperInfoEl = document.getElementById("pk-stepper-current-info");
+        if (stepperInfoEl) {
+            stepperInfoEl.textContent = isCompleted ? "6. Hoàn tất đơn hàng ✔" : (stepLabels[stepIndex - 1] || `Bước ${stepIndex}`);
+        }
+        // Cập nhật các step item
+        const stepItems = document.querySelectorAll(".pk-stepper-step");
+        stepItems.forEach((el, idx) => {
+            const num = idx + 1;
+            el.classList.remove("active", "completed", "error");
+            if (num < stepIndex || (num === stepIndex && isCompleted)) {
+                el.classList.add("completed");
+            } else if (num === stepIndex) {
+                el.classList.add("active");
+                if (SECURITY_BARRIER_TRIGGERED) el.classList.add("error");
+            }
+        });
+        broadcastStateUpdate();
+    }
+
+    // Khởi tạo đối tượng FSM
+    const fsm = {
+        currentState: localStorage.getItem("pk_fsm_current_state") || FSM_STATES.IDLE,
+        transition(newState, metadata = {}) {
+            if (this.currentState === newState) return;
+            const oldState = this.currentState;
+            fsmPreviousState = oldState;
+            this.currentState = newState;
+            STATE.fsmState = newState;
+            localStorage.setItem("pk_fsm_current_state", newState);
+            syncStorageBridge("pk_fsm_current_state", newState);
+
+            // Cập nhật Stepper index tương ứng
+            const stepMap = {
+                [FSM_STATES.LOGIN_IN_PROGRESS]: 1,
+                [FSM_STATES.MFA_PENDING]: 1,
+                [FSM_STATES.LOTTERY_SCANNING]: 2,
+                [FSM_STATES.QUEUE_PROCESSING]: 3,
+                [FSM_STATES.PRODUCT_NAVIGATING]: 3,
+                [FSM_STATES.CART_REVIEW]: 3,
+                [FSM_STATES.CHECKOUT_SHIPPING]: 4,
+                [FSM_STATES.CHECKOUT_PAYMENT]: 5,
+                [FSM_STATES.CHECKOUT_PLACE_ORDER]: 6,
+                [FSM_STATES.ORDER_CONFIRMED]: 6
+            };
+            if (stepMap[newState]) {
+                updateStepperUI(stepMap[newState], newState === FSM_STATES.ORDER_CONFIRMED);
+            }
+
+            addLog(`🔀 [FSM] Chuyển trạng thái: ${oldState} ➔ ${newState}`, "info");
+            broadcastStateUpdate();
+        },
+        pause() {
+            STATE.isPaused = true;
+            this.transition(FSM_STATES.ERROR_PAUSED);
+            addLog("⏸️ Bot đã tạm dừng. Bấm [▶ Tiếp tục] để chạy lại.", "warn");
+        },
+        resume() {
+            STATE.isPaused = false;
+            SECURITY_BARRIER_TRIGGERED = false;
+            const barrier = document.getElementById("pk-security-barrier-banner");
+            if (barrier) barrier.remove();
+
+            addLog("▶️ Đang tiếp tục chu trình tự động...", "info");
+            if (typeof processCurrentStep === 'function') {
+                processCurrentStep();
+            }
+        },
+        skip() {
+            addLog("⏭️ Bỏ qua bước hiện tại theo yêu cầu.", "warn");
+            if (typeof advanceSequentialQueue === 'function') {
+                advanceSequentialQueue("USER_SKIPPED");
+            }
+        }
+    };
+
+    // Alias cập nhật chỉ số Stepper cho các module bên ngoài
+    function updateCheckoutStepper(stepIndex, isCompleted = false) {
+        return updateStepperUI(stepIndex, isCompleted);
+    }
+
+    // Điều hướng thực thi hành động tương ứng với trang và trạng thái FSM hiện tại
+    function processCurrentStep() {
+        if (SECURITY_BARRIER_TRIGGERED || STATE.securityBlocked) {
+            addLog("⚠️ Bot đang bị chặn bởi rào cản bảo mật, không thể tiếp tục tự động.", "err");
+            return;
+        }
+
+        const path = window.location.pathname.toLowerCase();
+        if (path.includes("login") && !path.includes("mfa")) {
+            const acc = getActiveAccount();
+            if (acc) {
+                addLog("🔑 Thực hiện tự động điền & đăng nhập...", "info");
+                fillLoginForm(acc).then(filled => {
+                    if (filled) submitLoginForm();
+                });
+            } else {
+                addLog("⚠️ Chưa chọn tài khoản để đăng nhập.", "warn");
+            }
+        } else if (path.includes("mfa") || path.includes("passcode") || document.querySelector('#factor2AuthForm')) {
+            addLog("📩 Lấy mã OTP và tự điền...", "info");
+            fetchOtpFromLocalServer(0, false);
+        } else if (path.includes("/cart") || path.endsWith("/cart/")) {
+            addLog("🛒 Tiến hành đặt hàng từ Giỏ hàng...", "info");
+            proceedCartToCheckout();
+        } else if (path.includes("/order") || window.location.search.includes("stage=")) {
+            addLog("⚡ Xử lý bước đặt hàng hiện tại...", "info");
+            processOrderStep(true);
+        } else if (path.includes("/product") || window.location.search.includes("p_cd=") || /\/\d{10,14}\.html/.test(path)) {
+            addLog("⚡ Bấm đặt mua trên trang sản phẩm...", "info");
+            addToCartAndCheckout();
+        } else if (path.includes("lottery-history") || path.includes("/mypage") || path.includes("history")) {
+            const queueActive = localStorage.getItem("pk_auto_buy_queue_active") === "1";
+            if (queueActive) {
+                const winners = findWinningItemsOnPage();
+                if (winners.length > 0) startSequentialAutoBuy(winners);
+                else addLog("⚠️ Không còn sản phẩm trúng nào có thể mua.", "info");
+            } else {
+                scanLotteryResults(localStorage.getItem("pk_auto_buy_on_win") === "1");
+            }
+        } else if (path.includes("lottery/apply.html")) {
+            addLog("🚀 Chạy nộp đơn xổ số...", "info");
+            runBotProcess();
+        } else {
+            addLog("ℹ️ Chưa nhận diện được trang để tự động thao tác.", "info");
+        }
+    }
+
+    // Thiết lập lắng nghe message từ Content Script
+    let BRIDGE_LISTENER_ACTIVE = false;
+    function setupBridgeListener() {
+        if (BRIDGE_LISTENER_ACTIVE) return;
+        BRIDGE_LISTENER_ACTIVE = true;
+
+        window.addEventListener("message", (event) => {
+            if (!event.data || typeof event.data !== "object") return;
+            const { type, payload } = event.data;
+
+            if (type === "PK_BOT_STORAGE_DATA" && payload) {
+                if (payload.key && payload.value !== undefined) {
+                    try {
+                        const strVal = typeof payload.value === 'object' ? JSON.stringify(payload.value) : String(payload.value);
+                        localStorage.setItem(payload.key, strVal);
+                    } catch (e) {}
+                }
+            } else if (type === "PK_BOT_COMMAND" && payload) {
+                const cmd = payload.command;
+                addLog(`📩 Nhận lệnh từ Extension: [${cmd}]`, "info");
+                if (cmd === "START" || cmd === "RESUME") {
+                    fsm.resume();
+                } else if (cmd === "PAUSE") {
+                    fsm.pause();
+                } else if (cmd === "SKIP") {
+                    fsm.skip();
+                } else if (cmd === "RETRY") {
+                    if (typeof processCurrentStep === 'function') processCurrentStep();
+                } else if (cmd === "RESET") {
+                    localStorage.removeItem("pk_winning_queue");
+                    localStorage.removeItem("pk_auto_buy_queue_active");
+                    fsm.transition(FSM_STATES.IDLE);
+                    addLog("🔄 Đã reset trạng thái bot và hàng đợi.", "info");
+                }
+            } else if (type === "PK_BOT_CONFIG_UPDATE" && payload && payload.config) {
+                Object.keys(payload.config).forEach(k => {
+                    const v = payload.config[k];
+                    const strV = typeof v === 'object' ? JSON.stringify(v) : String(v);
+                    localStorage.setItem(k, strV);
+                });
+                addLog("⚙️ Đã đồng bộ cấu hình từ Extension Popup.", "info");
+            }
+        });
+    }
+
+    // Xuất state toàn cục window.__PK_BOT_STATE__ theo hợp đồng PROJECT.md
+    window.__PK_BOT_STATE__ = {
+        fsm: fsm,
+        get queue() {
+            try { return JSON.parse(localStorage.getItem("pk_winning_queue") || "[]"); } catch (e) { return []; }
+        },
+        get config() {
+            return {
+                autoLogin: localStorage.getItem("pk_auto_login") === "1",
+                autoScanLottery: localStorage.getItem("pk_auto_scan_lottery") === "1",
+                autoBuyQueueActive: localStorage.getItem("pk_auto_buy_queue_active") === "1",
+                autoOrderSteps: localStorage.getItem("pk_auto_order_steps") !== "0",
+                safePlaceOrder: localStorage.getItem("pk_safe_place_order") === "1",
+                autoPlaceOrder: localStorage.getItem("pk_auto_place_order") === "1",
+                delayMean: parseInt(localStorage.getItem("pk_delay_mean"), 10) || 2000,
+                delayStddev: parseInt(localStorage.getItem("pk_delay_stddev"), 10) || 500
+            };
+        },
+        logger: {
+            log: addLog,
+            getLogs: () => LOG_HISTORY.slice()
+        },
+        get stepper() {
+            return currentStepperIndex;
+        },
+        updateStepper: updateCheckoutStepper,
+        processCurrentStep: processCurrentStep
+    };
 
     // =========================================================================
     // QUẢN LÝ TÀI KHOẢN (ACCOUNTS MANAGEMENT)
@@ -61,13 +518,13 @@
         if (loaded.length === 0) {
             loaded = [
                 {
-                    id: "acc_1",
-                    name: "tuanapplejp@gmail",
-                    pokemon_email: "tuanapplejp@gmail.com",
-                    pokemon_password: "Hiro0052021@",
-                    otp_email: "tuanapplejp@gmail.com",
-                    gmail_app_password: "xrit ibjd ixdy bhjz",
-                    enabled: true
+                    id: "acc_demo",
+                    name: "Tài khoản mẫu",
+                    pokemon_email: "demo@example.com",
+                    pokemon_password: "",
+                    otp_email: "demo@example.com",
+                    gmail_app_password: "",
+                    enabled: false
                 }
             ];
             localStorage.setItem("pk_accounts", JSON.stringify(loaded));
@@ -79,9 +536,11 @@
         const savedActiveId = localStorage.getItem("pk_active_account_id");
         if (savedActiveId && STATE.accounts.some(a => a.id === savedActiveId)) {
             STATE.activeAccountId = savedActiveId;
-        } else {
+        } else if (STATE.accounts.length > 0) {
             STATE.activeAccountId = STATE.accounts[0].id;
             localStorage.setItem("pk_active_account_id", STATE.activeAccountId);
+        } else {
+            STATE.activeAccountId = null;
         }
 
         renderAccountDropdown();
@@ -281,7 +740,7 @@
 
                         <div class="pk-form-group">
                             <label class="pk-form-label">Mật khẩu ứng dụng Gmail (16 chữ cái):</label>
-                            <input type="text" id="pk-input-app-pwd" class="pk-form-input" placeholder="VD: xrit ibjd ixdy bhjz" value="${editingAcc ? (editingAcc.gmail_app_password || '') : ''}">
+                            <input type="text" id="pk-input-app-pwd" class="pk-form-input" placeholder="VD: abcd efgh ijkl mnop" value="${editingAcc ? (editingAcc.gmail_app_password || '') : ''}">
                         </div>
 
                         <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px;">
@@ -464,8 +923,24 @@
     //   - Event isTrusted flag
     // =========================================================================
 
-    // Gaussian random: tạo delay phân bố chuẩn giống con người thật
-    function gaussianRandom(mean, stddev) {
+    // Gaussian random: tạo delay phân bố chuẩn giống con người thật, tích hợp cấu hình từ Extension Popup
+    function gaussianRandom(defaultMean = 2000, defaultStddev = 500) {
+        const storedMean = localStorage.getItem("pk_delay_mean");
+        const storedStddev = localStorage.getItem("pk_delay_stddev");
+        const userMean = storedMean ? parseInt(storedMean, 10) : NaN;
+        const userStddev = storedStddev ? parseInt(storedStddev, 10) : NaN;
+
+        let mean = (!isNaN(userMean) && userMean > 0) ? userMean : (defaultMean || 2000);
+        let stddev = (!isNaN(userStddev) && userStddev > 0) ? userStddev : (defaultStddev || 500);
+
+        // Nếu caller truyền delay vi mô (như gõ phím / focus tab < 400ms),
+        // tỷ lệ hóa theo cấu hình độ trễ người dùng so với mốc cơ sở 2000ms
+        if (defaultMean && defaultMean < 400 && !isNaN(userMean) && userMean > 0) {
+            const factor = userMean / 2000;
+            mean = Math.max(20, Math.round(defaultMean * factor));
+            stddev = Math.max(5, Math.round((defaultStddev || (defaultMean * 0.25)) * factor));
+        }
+
         let u = 0, v = 0;
         while (u === 0) u = Math.random();
         while (v === 0) v = Math.random();
@@ -536,30 +1011,48 @@
         return gaussianRandom(95, 30); // 65-125ms (tốc độ gõ ~80 WPM)
     }
 
-    // Giả lập di chuột vào element trước khi click/focus
+    // Giả lập di chuột vào element trước khi click/focus với đường cong Bezier và micro-jitter
     function simulateMouseApproach(el) {
-        const rect = el.getBoundingClientRect();
-        const targetX = rect.left + rect.width / 2 + (Math.random() * 20 - 10);
-        const targetY = rect.top + rect.height / 2 + (Math.random() * 6 - 3);
+        if (!el) return;
+        let targetX = 0, targetY = 0;
+        let startX = 0, startY = 0;
 
-        el.dispatchEvent(new MouseEvent('mouseenter', {
-            clientX: targetX, clientY: targetY, bubbles: true
-        }));
-        el.dispatchEvent(new MouseEvent('mouseover', {
-            clientX: targetX, clientY: targetY, bubbles: true
-        }));
-        el.dispatchEvent(new MouseEvent('mousemove', {
-            clientX: targetX, clientY: targetY, bubbles: true
-        }));
-        el.dispatchEvent(new MouseEvent('mousedown', {
-            clientX: targetX, clientY: targetY, button: 0, bubbles: true
-        }));
-        el.dispatchEvent(new MouseEvent('mouseup', {
-            clientX: targetX, clientY: targetY, button: 0, bubbles: true
-        }));
-        el.dispatchEvent(new MouseEvent('click', {
-            clientX: targetX, clientY: targetY, button: 0, bubbles: true
-        }));
+        if (typeof el.getBoundingClientRect === 'function') {
+            const rect = el.getBoundingClientRect();
+            targetX = rect.left + rect.width / 2 + (Math.random() * 12 - 6);
+            targetY = rect.top + rect.height / 2 + (Math.random() * 6 - 3);
+            startX = Math.max(0, targetX - 40 + (Math.random() * 20 - 10));
+            startY = Math.max(0, targetY - 40 + (Math.random() * 20 - 10));
+        }
+
+        // Tạo 2 điểm điều khiển Bezier bậc 3 với độ lệch jitter tự nhiên
+        const cp1X = startX + (targetX - startX) * 0.3 + (Math.random() * 10 - 5);
+        const cp1Y = startY + (targetY - startY) * 0.1 + (Math.random() * 10 - 5);
+        const cp2X = startX + (targetX - startX) * 0.7 + (Math.random() * 10 - 5);
+        const cp2Y = startY + (targetY - startY) * 0.9 + (Math.random() * 10 - 5);
+
+        // Dispatch chuỗi tọa độ nội suy dọc theo đường cong Bezier
+        const trajectorySteps = 3;
+        for (let i = 1; i <= trajectorySteps; i++) {
+            const t = i / trajectorySteps;
+            const bx = Math.pow(1 - t, 3) * startX + 3 * Math.pow(1 - t, 2) * t * cp1X + 3 * (1 - t) * Math.pow(t, 2) * cp2X + Math.pow(t, 3) * targetX;
+            const by = Math.pow(1 - t, 3) * startY + 3 * Math.pow(1 - t, 2) * t * cp1Y + 3 * (1 - t) * Math.pow(t, 2) * cp2Y + Math.pow(t, 3) * targetY;
+            try {
+                el.dispatchEvent(new MouseEvent('mousemove', {
+                    clientX: Math.round(bx),
+                    clientY: Math.round(by),
+                    bubbles: true
+                }));
+            } catch (e) {}
+        }
+
+        try {
+            el.dispatchEvent(new MouseEvent('mouseenter', { clientX: targetX, clientY: targetY, bubbles: true }));
+            el.dispatchEvent(new MouseEvent('mouseover', { clientX: targetX, clientY: targetY, bubbles: true }));
+            el.dispatchEvent(new MouseEvent('mousedown', { clientX: targetX, clientY: targetY, button: 0, bubbles: true }));
+            el.dispatchEvent(new MouseEvent('mouseup', { clientX: targetX, clientY: targetY, button: 0, bubbles: true }));
+            el.dispatchEvent(new MouseEvent('click', { clientX: targetX, clientY: targetY, button: 0, bubbles: true }));
+        } catch (e) {}
     }
 
     // Giả lập gõ từng ký tự giống con người thật (phiên bản nâng cao toàn diện)
@@ -2043,7 +2536,8 @@
             '同時に注文できない商品がカートに投入されています',
             'カートの商品を空にしてから',
             '同時に注文できない',
-            'カートの商品を空にしてから、改めて注文してください'
+            'カートの商品を空にしてから、改めて注文してください',
+            '同時にご注文いただけない商品'
         ];
 
         // 1. Kiểm tra trong các khối thông báo lỗi chuẩn Demandware / Pokemon Center
@@ -2067,6 +2561,35 @@
         }
 
         return { detected: false, message: '', element: null };
+    }
+
+    // 0.0 Tự phục hồi thông minh khi xung đột giỏ hàng (Self-Healing Cart Conflict Recovery)
+    function handleCartConflictRecovery() {
+        addLog("⚠️ PHÁT HIỆN LỖI XUNG ĐỘT GIỎ HÀNG: '同時に注文できない商品がカートに投入されています'!", "warn");
+        const path = window.location.pathname.toLowerCase();
+
+        if (path.includes('/cart')) {
+            // Đang ở /cart/ -> không chuyển hướng lại /cart/ để tránh vòng lặp vô tận!
+            const shouldPurge = localStorage.getItem("pk_cart_purge_on_conflict") === "1";
+            if (shouldPurge) {
+                addLog("🗑️ Cấu hình xóa giỏ khi xung đột đang BẬT: Đang dọn sạch giỏ hàng...", "warn");
+                emptyAllCartItems();
+            } else {
+                addLog("🛒 Tự động tiến hành thanh toán sản phẩm đang chiếm chỗ trong giỏ hàng trước...", "info");
+                proceedCartToCheckout();
+            }
+        } else {
+            // Đang ở PDP hoặc trang khác -> Lưu URL để quay lại sau và điều hướng sang /cart/
+            localStorage.setItem("pk_cart_conflict_recovery", "1");
+            localStorage.setItem("pk_conflict_resume_url", window.location.href);
+            syncStorageBridge("pk_cart_conflict_recovery", "1");
+            syncStorageBridge("pk_conflict_resume_url", window.location.href);
+
+            addLog("🛒 Tự động chuyển hướng ngay sang Giỏ hàng (/cart/) để giải quyết sản phẩm xung đột...", "success");
+            setTimeout(() => {
+                window.location.href = "https://www.pokemoncenter-online.com/cart/";
+            }, 1000);
+        }
     }
 
     // 0.1 Xóa sạch toàn bộ sản phẩm trong giỏ hàng (/cart/)
@@ -2112,9 +2635,19 @@
             }
 
             addLog("✅ Đã gửi lệnh xóa toàn bộ sản phẩm trong giỏ hàng! Đang tải lại...", "success");
-            setTimeout(() => {
-                window.location.reload();
-            }, 1000);
+            const resumeUrl = localStorage.getItem("pk_conflict_resume_url");
+            if (resumeUrl) {
+                localStorage.removeItem("pk_conflict_resume_url");
+                localStorage.removeItem("pk_cart_conflict_recovery");
+                addLog(`🚀 Giỏ hàng đã sạch! Tự động quay lại sản phẩm: ${resumeUrl}...`, "success");
+                setTimeout(() => {
+                    window.location.href = resumeUrl;
+                }, 1200);
+            } else {
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+            }
             return true;
         } finally {
             window.confirm = originalConfirm;
@@ -2148,6 +2681,11 @@
 
     // 2. Chuyển từ giỏ hàng sang bước đặt hàng
     async function proceedCartToCheckout() {
+        if (typeof fsm !== 'undefined') {
+            fsm.transition(FSM_STATES.CART_REVIEW);
+        }
+        updateStepperUI(3);
+
         const btn = findCartCheckoutButton();
         if (!btn) {
             addLog("⚠️ Không tìm thấy nút đặt hàng (ご注文手続きへ) hoặc giỏ hàng đang trống.", "warn");
@@ -2178,33 +2716,47 @@
     }
 
     // 3. Nhận diện chính xác giai đoạn đặt hàng hiện tại (/order/)
+    // SỬA LỖI ĐẢO NGƯỢC THỨ TỰ ƯU TIÊN (Bug 2):
+    // Trên Demandware Single-Page Accordion, #checkout-main[data-checkout-stage]
+    // BẮT BUỘC phải có ưu tiên tuyệt đối hơn stageParam (?stage=...) vì chuyển bước bằng AJAX!
     function detectOrderStage() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const stageParam = urlParams.get('stage') || '';
-
         // 1. Kiểm tra nếu đã hoàn tất đơn hàng
-        if (stageParam === 'complete' ||
-            document.querySelector('.order-confirmation, .receipt, .order-thank-you-msg') ||
-            Array.from(document.querySelectorAll('h1, h2, h3, p')).some(el => el.textContent.includes('ご注文ありがとうございました'))) {
+        const orderCompleteMarkers = document.querySelector('.order-confirmation, .receipt, .order-thank-you-msg, .confirmation-message, .order-complete');
+        const completeTextFound = Array.from(document.querySelectorAll('h1, h2, h3, p, div')).some(el => {
+            if (el.closest('#pk-auto-bot-container')) return false;
+            const t = el.textContent || '';
+            return t.includes('ご注文ありがとうございました') || t.includes('ご注文が完了しました');
+        });
+        if (orderCompleteMarkers || completeTextFound) {
             return 'complete';
         }
 
-        // 2. Lấy thuộc tính data-checkout-stage từ container Demandware (#checkout-main)
+        // 2. Ưu tiên TUYỆT ĐỐI: Lấy thuộc tính data-checkout-stage từ container Demandware (#checkout-main)
         const checkoutMain = document.getElementById('checkout-main') || document.querySelector('.data-checkout-stage');
         const domStage = checkoutMain ? checkoutMain.getAttribute('data-checkout-stage') : '';
 
-        // 3. Ưu tiên URL parameter chính thống của website
-        if (stageParam === 'shipping' || stageParam === 'payment' || stageParam === 'placeOrder') {
-            return stageParam;
+        if (domStage === 'complete' || domStage === 'submitted') {
+            return 'complete';
         }
-
-        // 4. Ưu tiên thuộc tính DOM do Demandware checkout.js cập nhật
         if (domStage === 'shipping' || domStage === 'payment' || domStage === 'placeOrder') {
             return domStage;
         }
 
-        // 5. Fallback: Kiểm tra nút bấm đang hiển thị thực tế (Visible)
-        const isVisible = (el) => el && (el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0);
+        // 3. Fallback: URL parameter (?stage=...)
+        const urlParams = new URLSearchParams(window.location.search);
+        const stageParam = urlParams.get('stage') || '';
+        if (stageParam === 'complete') return 'complete';
+        if (stageParam === 'shipping' || stageParam === 'payment' || stageParam === 'placeOrder') {
+            return stageParam;
+        }
+
+        // 4. Fallback: Kiểm tra nút bấm đang hiển thị thực tế (Visible)
+        const isVisible = (el) => {
+            if (!el) return false;
+            if (el.closest('#pk-auto-bot-container')) return false;
+            if (el.offsetWidth > 0 || el.offsetHeight > 0 || (el.getClientRects && el.getClientRects().length > 0)) return true;
+            return el.style.display !== 'none' && el.style.visibility !== 'hidden' && !el.hasAttribute('hidden');
+        };
 
         const placeBtn = Array.from(document.querySelectorAll('a, button')).find(el => {
             if (el.closest('#pk-auto-bot-container')) return false;
@@ -2220,19 +2772,34 @@
         });
         if (paymentBtn) return 'payment';
 
+        const shippingBtn = Array.from(document.querySelectorAll('a, button')).find(el => {
+            if (el.closest('#pk-auto-bot-container')) return false;
+            const txt = (el.textContent || '').trim().replace(/\s+/g, '');
+            return (txt.includes('お支払い方法選択へ進む') || txt.includes('お支払い方法へ')) && isVisible(el);
+        });
+        if (shippingBtn) return 'shipping';
+
+        // 5. Fallback: Khối form hiển thị
+        const confirmContainer = document.querySelector('.mailForm-confirm, .place-order-stage');
+        if (confirmContainer && isVisible(confirmContainer)) return 'placeOrder';
+
+        const paymentContainer = document.querySelector('.payment-form, .mailForm-payment');
+        if (paymentContainer && isVisible(paymentContainer)) return 'payment';
+
+        const shippingContainer = document.querySelector('.mailForm-shipping, .shipping-form');
+        if (shippingContainer && isVisible(shippingContainer)) return 'shipping';
+
         return 'shipping';
     }
 
     // 4. Tìm nút xác nhận địa chỉ giao hàng (Stage: Shipping) -> "お支払い方法選択へ進む"
     function findShippingNextButton() {
-        // Ưu tiên 1: Thẻ <a class="submit-shipping" href=""> chuẩn Demandware
         const directBtn = document.querySelector('.next-step-button .submit-shipping') ||
                           document.querySelector('a.submit-shipping') ||
                           document.querySelector('.submit-shipping') ||
                           document.querySelector('button.submit-shipping');
         if (directBtn) return directBtn;
 
-        // Ưu tiên 2: Quét text loại bỏ khoảng cách
         return Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]')).find(b => {
             if (b.closest('#pk-auto-bot-container')) return false;
             const txt = (b.textContent || b.value || '').trim().replace(/[\s\u3000\u00a0]+/g, '');
@@ -2257,8 +2824,7 @@
 
     // 6. Tìm nút Chốt đơn cuối cùng (Stage: Place Order) -> "注文を確定する"
     function findPlaceOrderButton() {
-        // Nút trên Pokémon Center là thẻ <a>: <li class="list02 next-step-button"><a href="">注文を確定する</a></li>
-        const directLink = Array.from(document.querySelectorAll('.next-step-button a, a, button, input[type="submit"]')).find(b => {
+        const directLink = Array.from(document.querySelectorAll('.next-step-button a, li.list02.next-step-button > a, a, button, input[type="submit"]')).find(b => {
             if (b.closest('#pk-auto-bot-container')) return false;
             const txt = (b.textContent || b.value || '').trim().replace(/[\s\u3000\u00a0]+/g, '');
             return txt === '注文を確定する' || txt.includes('注文を確定する') || txt.includes('購入を確定する');
@@ -2266,6 +2832,88 @@
         if (directLink) return directLink;
 
         return document.querySelector('button.place-order, .place-order, button.placeOrderBtn');
+    }
+
+    // Điền trực tiếp các trường ẩn của Demandware từ radio polAddressSelector (loidungbuocchondiachi.har fix)
+    function populateDemandwareShippingAddressFields(radio) {
+        if (!radio) return;
+        const form = radio.closest('form') || document.querySelector('form.shipping-form, form[name="dwfrm_shipping"]');
+        
+        const dataMap = {};
+        if (radio.dataset) {
+            Object.keys(radio.dataset).forEach(key => {
+                dataMap[key] = radio.dataset[key];
+            });
+        }
+        Array.from(radio.attributes).forEach(attr => {
+            if (attr.name.startsWith('data-')) {
+                const camelKey = attr.name.slice(5).replace(/-([a-z])/g, (_, g) => g.toUpperCase());
+                dataMap[camelKey] = attr.value;
+                dataMap[attr.name] = attr.value;
+            }
+        });
+
+        if (form) {
+            const fieldMapping = {
+                'lastName': ['lastName', 'data-last-name'],
+                'firstName': ['firstName', 'data-first-name'],
+                'address1': ['address1', 'data-address1'],
+                'address2': ['address2', 'data-address2'],
+                'city': ['city', 'data-city'],
+                'stateCode': ['stateCode', 'state-code', 'data-state-code'],
+                'country': ['country', 'countryCode', 'data-country-code'],
+                'countryCode': ['country', 'countryCode', 'data-country-code'],
+                'postalCode': ['postalCode', 'postal-code', 'data-postal-code'],
+                'phone': ['phone', 'data-phone'],
+                'nameKana': ['nameKana', 'name-kana', 'data-name-kana']
+            };
+
+            Object.keys(fieldMapping).forEach(targetName => {
+                const possibleKeys = fieldMapping[targetName];
+                let val = '';
+                for (const k of possibleKeys) {
+                    if (dataMap[k] !== undefined && dataMap[k] !== '') {
+                        val = dataMap[k];
+                        break;
+                    }
+                }
+                if (val) {
+                    const matchedInputs = Array.from(form.querySelectorAll('input, select')).filter(inp => {
+                        const name = inp.getAttribute('name') || '';
+                        return name.endsWith(targetName) || name.toLowerCase().endsWith(targetName.toLowerCase());
+                    });
+                    matchedInputs.forEach(inp => {
+                        inp.value = val;
+                        inp.dispatchEvent(new Event('input', { bubbles: true }));
+                        inp.dispatchEvent(new Event('change', { bubbles: true }));
+                    });
+                }
+            });
+        }
+
+        // Dispatch synthetic event with originalEvent backing to bypass Demandware if(!e.originalEvent) return;
+        try {
+            const nativeChangeEvent = new Event('change', { bubbles: true, cancelable: true });
+            Object.defineProperty(nativeChangeEvent, 'originalEvent', {
+                value: nativeChangeEvent,
+                writable: true,
+                configurable: true
+            });
+            radio.dispatchEvent(nativeChangeEvent);
+        } catch (e) {
+            try { radio.dispatchEvent(new Event('change', { bubbles: true })); } catch (err) {}
+        }
+
+        if (window.$) {
+            try {
+                const jqEvent = window.$.Event('change');
+                jqEvent.originalEvent = new Event('change');
+                window.$(radio).trigger(jqEvent);
+            } catch (e) {}
+        }
+
+        const addrName = dataMap['lastName'] || dataMap['data-last-name'] || radio.value || 'Đã chọn';
+        addLog(`🏠 Đã tự động đồng bộ & chọn địa chỉ giao hàng: [${addrName}]!`, "success");
     }
 
     // Tự động theo dõi và tự kích hoạt bước tiếp theo khi chuyển stage (AJAX Demandware)
@@ -2326,10 +2974,10 @@
 
     function updateStageLabels(stage) {
         const stageLabels = {
-            'shipping': '🚚 Bước 1: Địa chỉ giao hàng',
-            'payment': '💳 Bước 2: Phương thức thanh toán',
-            'placeOrder': '📦 Bước 3: Xác nhận & Chốt đơn',
-            'complete': '🎉 Bước 4: Đặt hàng thành công'
+            'shipping': '🚚 Bước 4: Địa chỉ giao hàng',
+            'payment': '💳 Bước 5: Phương thức thanh toán',
+            'placeOrder': '📦 Bước 6: Xác nhận & Chốt đơn',
+            'complete': '🎉 Bước 6: Đặt hàng thành công'
         };
         const stageEl = document.getElementById("pk-order-current-stage");
         if (stageEl) stageEl.textContent = stageLabels[stage] || stage;
@@ -2343,6 +2991,9 @@
 
         if (stage === 'shipping') {
             addLog("🚚 Đang ở bước: Xác nhận Địa chỉ nhận hàng (stage=shipping)...", "info");
+            if (typeof fsm !== 'undefined') fsm.transition(FSM_STATES.CHECKOUT_SHIPPING);
+            updateStepperUI(4);
+
             const nextBtn = findShippingNextButton();
             if (!nextBtn) {
                 addLog("⚠️ Chưa thấy nút chuyển bước thanh toán (submit-shipping).", "warn");
@@ -2350,14 +3001,15 @@
             }
 
             // Đảm bảo địa chỉ giao hàng đã được chọn (nếu có radio polAddressSelector)
-            const selectedAddress = document.querySelector('input.polAddressSelector:checked');
-            if (!selectedAddress) {
-                const firstAddress = document.querySelector('input.polAddressSelector');
-                if (firstAddress) {
-                    firstAddress.checked = true;
-                    firstAddress.dispatchEvent(new Event('change', { bubbles: true }));
-                    addLog("🏠 Đã tự động tích chọn địa chỉ giao hàng đầu tiên.", "info");
-                }
+            const addressRadio = document.querySelector('input.polAddressSelector:checked') ||
+                                 document.querySelector('input.polAddressSelector[value="ab_登録住所"]') ||
+                                 document.querySelector('input.polAddressSelector');
+
+            if (addressRadio) {
+                addressRadio.checked = true;
+                populateDemandwareShippingAddressFields(addressRadio);
+            } else {
+                addLog("⚠️ Không tìm thấy radio input.polAddressSelector trên trang shipping.", "warn");
             }
 
             nextBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -2369,7 +3021,6 @@
             simulateMouseApproach(nextBtn);
             nextBtn.focus();
 
-            // Kích hoạt toàn diện các sự kiện chuột
             const events = ['mouseenter', 'mouseover', 'mousedown', 'mouseup', 'click'];
             events.forEach(evt => {
                 try { nextBtn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window })); } catch (e) {}
@@ -2379,6 +3030,14 @@
             if (window.$) try { window.$(nextBtn).trigger('click'); } catch (e) {}
 
             addLog("✅ Đã bấm [お支払い方法選択へ進む]! Đang chuyển sang bước Phương thức thanh toán...", "success");
+
+            // Kiểm tra lỗi hiển thị trong comErrorBox nếu có
+            setTimeout(() => {
+                const comErr = document.querySelector('.mailForm-shipping .comErrorBox, .mailForm-shipping .alert-danger');
+                if (comErr && comErr.textContent.trim().length > 0) {
+                    addLog(`⚠️ Báo lỗi từ Demandware shipping: ${comErr.textContent.trim()}`, "err");
+                }
+            }, 1000);
 
             // Đợi 2.5s kiểm tra xem đã chuyển sang payment hay chưa
             setTimeout(() => {
@@ -2394,6 +3053,39 @@
 
         if (stage === 'payment') {
             addLog("💳 Đang ở bước: Phương thức thanh toán (stage=payment)...", "info");
+            if (typeof fsm !== 'undefined') fsm.transition(FSM_STATES.CHECKOUT_PAYMENT);
+            updateStepperUI(5);
+
+            // 1. Kiểm tra phương thức thanh toán
+            const paymentRadios = Array.from(document.querySelectorAll('input[name="radioMethodMain"]'));
+            if (paymentRadios.length > 0) {
+                const checkedRadio = paymentRadios.find(r => r.checked);
+                if (!checkedRadio) {
+                    const ccRadio = paymentRadios.find(r => r.value === 'CREDIT_CARD') || paymentRadios[0];
+                    if (ccRadio) {
+                        ccRadio.checked = true;
+                        ccRadio.dispatchEvent(new Event('change', { bubbles: true }));
+                        if (window.$) try { window.$(ccRadio).trigger('change'); } catch (e) {}
+                        addLog(`💳 Đã chọn phương thức thanh toán: [${ccRadio.value}]`, "info");
+                    }
+                } else {
+                    addLog(`💳 Phương thức thanh toán hiện tại: [${checkedRadio.value}]`, "info");
+                }
+            }
+
+            // 2. Kiểm tra nếu có cảnh báo giới hạn thẻ tín dụng
+            const cardLimitError = document.querySelector('.no-new-card-message');
+            if (cardLimitError && (cardLimitError.offsetWidth > 0 || cardLimitError.style.display !== 'none')) {
+                addLog("⚠️ CẢNH BÁO: Thẻ tín dụng bị giới hạn ('クレジットカード情報の登録・更新が制限されています')!", "warn");
+            }
+
+            // 3. Kiểm tra xem có thẻ đã lưu hay đang ở form thẻ mới
+            const newCardArea = document.querySelector('.new-card-area');
+            const storedCardArea = document.querySelector('.stored-credit-card');
+            if (newCardArea && (newCardArea.offsetWidth > 0 || newCardArea.style.display !== 'none') && (!storedCardArea || storedCardArea.children.length === 0)) {
+                addLog("ℹ️ Chưa có thẻ lưu sẵn, đang hiển thị form thẻ mới (.new-card-area).", "info");
+            }
+
             const nextBtn = findPaymentNextButton();
             if (!nextBtn) {
                 addLog("⚠️ Chưa thấy nút chuyển sang xem lại đơn hàng (submit-payment).", "warn");
@@ -2433,6 +3125,8 @@
 
         if (stage === 'placeOrder') {
             addLog("📦 Đang ở bước cuối: Xác nhận & Chốt đơn hàng (stage=placeOrder)...", "warn");
+            if (typeof fsm !== 'undefined') fsm.transition(FSM_STATES.CHECKOUT_PLACE_ORDER);
+            updateStepperUI(6);
 
             // Tự động tích chọn checkbox đồng ý điều khoản mua sắm (nếu có)
             document.querySelectorAll('input[type="checkbox"]').forEach(chk => {
@@ -2458,10 +3152,15 @@
             placeBtn.style.outlineOffset = "3px";
             placeBtn.style.boxShadow = "0 0 25px rgba(253, 203, 110, 0.9)";
 
-            const autoPlace = localStorage.getItem("pk_auto_place_order") === "1";
-            if (autoPlace || force) {
+            // Hỗ trợ công tắc Chốt đơn an toàn (Safe Place Order Switch)
+            // Nếu safe place order bật (hoặc auto place tắt) -> Tạm dừng chờ người dùng xác nhận
+            const safeModeOn = localStorage.getItem("pk_safe_place_order") === "1";
+            const autoPlaceOn = localStorage.getItem("pk_auto_place_order") === "1";
+            const shouldAutoPlace = (autoPlaceOn && !safeModeOn) || force;
+
+            if (shouldAutoPlace) {
                 addLog("⚡ Đang chuẩn bị chốt đơn tự động theo cài đặt...", "warn");
-                await new Promise(r => setTimeout(r, gaussianRandom(1500, 300)));
+                await new Promise(r => setTimeout(r, gaussianRandom(1800, 300)));
                 simulateMouseApproach(placeBtn);
                 placeBtn.focus();
 
@@ -2477,50 +3176,22 @@
                 return true;
             } else {
                 addLog("✨ ĐÃ TỚI BƯỚC CUỐI CÙNG (stage=placeOrder)!", "success");
-                addLog("👉 Chế độ an toàn đang BẬT: Hãy kiểm tra lại tổng tiền trên web rồi bấm nút [注文を確定する] (hoặc bấm nút màu cam trên Widget) để chốt đơn!", "warn");
+                addLog("👉 Chế độ chốt đơn an toàn (Safe Place Order Switch) đang BẬT: Hãy kiểm tra lại tổng tiền trên web rồi bấm nút [注文を確定する] (hoặc nút [▶ Tiếp tục] trên Widget) để chốt đơn!", "warn");
                 return true;
             }
         }
 
         if (stage === 'complete') {
             addLog("🎉🎉 ĐẶT HÀNG THÀNH CÔNG! Đơn hàng đã được xác nhận!", "success");
-            const orderNumEl = document.querySelector('.order-number, .orderNumber, .receipt-number, .order-thank-you-msg');
+            if (typeof fsm !== 'undefined') fsm.transition(FSM_STATES.ORDER_CONFIRMED);
+            updateStepperUI(6, true);
+
+            const orderNumEl = document.querySelector('.order-number, .orderNumber, .receipt-number, .order-thank-you-msg, .order-id');
             if (orderNumEl) {
                 addLog(`📦 Chi tiết đơn hàng: ${orderNumEl.textContent.trim().replace(/\s+/g, ' ')}`, "success");
             }
 
-            // Kiểm tra hàng đợi mua tự động (Winner Sequential Purchase Queue)
-            const queueStr = localStorage.getItem("pk_winning_queue");
-            const queueActive = localStorage.getItem("pk_auto_buy_queue_active") === "1";
-            if (queueActive && queueStr) {
-                try {
-                    let queue = JSON.parse(queueStr);
-                    if (Array.isArray(queue) && queue.length > 0) {
-                        const finishedItem = queue.shift(); // Xóa món vừa hoàn tất đặt mua
-                        localStorage.setItem("pk_winning_queue", JSON.stringify(queue));
-                        addLog(`✅ Đã hoàn tất đặt mua món trúng: [${finishedItem.title || 'Món #' + finishedItem.id}]!`, "success");
-
-                        if (queue.length > 0) {
-                            const nextItem = queue[0];
-                            addLog(`⏳ HÀNG ĐỢI: Còn lại ${queue.length} sản phẩm trúng thưởng cần mua tiếp!`, "warn");
-                            addLog(`🚀 Tự động chuyển sang mua sản phẩm tiếp theo: [${nextItem.title}] sau 4 giây...`, "warn");
-                            setTimeout(() => {
-                                if (nextItem.url) {
-                                    window.location.href = nextItem.url;
-                                } else {
-                                    window.location.href = "https://www.pokemoncenter-online.com/lottery-history/";
-                                }
-                            }, 4000);
-                        } else {
-                            localStorage.removeItem("pk_winning_queue");
-                            localStorage.removeItem("pk_auto_buy_queue_active");
-                            addLog(`🏆🏆 CHÚC MỪNG BẠN! TOÀN BỘ CÁC SẢN PHẨM TRÚNG ĐÃ ĐƯỢC MUA THÀNH CÔNG!`, "success");
-                        }
-                    }
-                } catch (e) {
-                    console.error("Lỗi xử lý hàng đợi trúng thưởng:", e);
-                }
-            }
+            advanceSequentialQueue('ORDER_SUCCESS');
             return true;
         }
 
@@ -2528,25 +3199,186 @@
         return false;
     }
 
+    // 8.1 Kiểm tra sản phẩm trên PDP có bị hết hàng hoặc hết hạn đặt mua hay không
+    function checkPdpOutOfStockOrExpired() {
+        const expiredKeywords = [
+            '受付終了',
+            '注文期限切れ',
+            '購入期限切れ',
+            '販売終了',
+            '在庫切れ',
+            '品切れ',
+            '現在、ご注文いただけません',
+            '売り切れ',
+            '受付期間が終了しました',
+            '注文期間が終了しました'
+        ];
+
+        const badges = Array.from(document.querySelectorAll('.out-of-stock, .status-soldout, .badge-closed, .lottery-status, .c-status, .sold-out, .notice, .alert'));
+        for (const el of badges) {
+            if (el.closest('#pk-auto-bot-container')) continue;
+            const txt = el.textContent || '';
+            for (const kw of expiredKeywords) {
+                if (txt.includes(kw)) {
+                    return { expired: true, reason: kw, element: el };
+                }
+            }
+        }
+
+        const mainSection = document.querySelector('.product-detail, .pdp-main, #main, .main-content') || document.body;
+        if (mainSection) {
+            const txt = mainSection.innerText || mainSection.textContent || '';
+            for (const kw of expiredKeywords) {
+                if (txt.includes(kw)) {
+                    const hasValidBtn = Array.from(mainSection.querySelectorAll('button, a')).some(b => {
+                        if (b.closest('#pk-auto-bot-container')) return false;
+                        const bTxt = (b.textContent || '').replace(/\s+/g, '');
+                        return (bTxt.includes('予約する') || bTxt.includes('カートに入れる')) && !b.disabled;
+                    });
+                    if (!hasValidBtn) {
+                        return { expired: true, reason: kw, element: null };
+                    }
+                }
+            }
+        }
+
+        return { expired: false, reason: '', element: null };
+    }
+
+    // 8.2 Helper tìm nút Thêm giỏ hàng / Đặt trước (Fix Blocker Bug 1)
+    function findAddToCartButton() {
+        const isOutOfStock = checkPdpOutOfStockOrExpired();
+        if (isOutOfStock.expired) {
+            return null;
+        }
+
+        const isVisible = (el) => {
+            if (!el) return false;
+            if (el.closest('#pk-auto-bot-container')) return false;
+            if (el.offsetWidth > 0 || el.offsetHeight > 0 || (el.getClientRects && el.getClientRects().length > 0)) {
+                return true;
+            }
+            return el.style.display !== 'none' && el.style.visibility !== 'hidden' && !el.hasAttribute('hidden');
+        };
+
+        const specificSelectors = [
+            '.btn-add-to-cart',
+            'button[type="submit"].add-to-cart',
+            '.add-to-cart',
+            'button.add-to-cart',
+            'a.add-to-cart',
+            'input[type="submit"].add-to-cart',
+            'button.reservation-btn',
+            '.reservation-btn',
+            'a.reservation-btn',
+            'button.btn-cart',
+            '.btn-cart',
+            'a.btn-cart',
+            'button.btn-order',
+            'a.btn-order',
+            'button[name="dwfrm_product_addtocart_button"]'
+        ];
+
+        for (const sel of specificSelectors) {
+            const els = Array.from(document.querySelectorAll(sel));
+            for (const el of els) {
+                if (el.closest('#pk-auto-bot-container')) continue;
+                if (!el.disabled && !el.classList.contains('disabled') && isVisible(el)) {
+                    return el;
+                }
+            }
+        }
+
+        const candidates = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]')).filter(b => {
+            if (b.closest('#pk-auto-bot-container') || b.closest('header') || b.closest('#header') || b.closest('footer')) return false;
+            if (b.disabled || b.classList.contains('disabled')) return false;
+            return isVisible(b);
+        });
+
+        const targetKeywords = [
+            '予約する',
+            'カートに入れる',
+            '購入手続きへ',
+            '注文へ進む',
+            '今すぐ予約',
+            '予約に進む',
+            'カートに追加'
+        ];
+
+        for (const kw of targetKeywords) {
+            const found = candidates.find(b => {
+                const txt = (b.textContent || b.value || '').trim().replace(/[\s\u3000\u00a0\r\n\t]+/g, '');
+                return txt.includes(kw);
+            });
+            if (found) return found;
+        }
+
+        return null;
+    }
+
+    // 8.3 Chuyển tiếp hàng đợi tuần tự sang món tiếp theo
+    function advanceSequentialQueue(reason = 'ORDER_SUCCESS') {
+        const queueStr = localStorage.getItem("pk_winning_queue");
+        const queueActive = localStorage.getItem("pk_auto_buy_queue_active") === "1";
+        if (!queueActive || !queueStr) return;
+
+        try {
+            let queue = JSON.parse(queueStr);
+            if (!Array.isArray(queue) || queue.length === 0) return;
+
+            const finishedItem = queue.shift();
+            localStorage.setItem("pk_winning_queue", JSON.stringify(queue));
+            syncStorageBridge("pk_winning_queue", queue);
+
+            if (reason === 'ORDER_SUCCESS') {
+                addLog(`✅ Đã hoàn tất đặt mua món trúng: [${finishedItem.title || 'Món #' + finishedItem.id}]!`, "success");
+            } else {
+                addLog(`⏭️ Đã bỏ qua món trúng [${finishedItem.title || 'Món #' + finishedItem.id}] (Lý do: ${reason}).`, "warn");
+            }
+
+            if (queue.length > 0) {
+                const nextItem = queue[0];
+                addLog(`⏳ HÀNG ĐỢI: Còn lại ${queue.length} sản phẩm trúng thưởng cần mua tiếp!`, "warn");
+                addLog(`🚀 Tự động chuyển sang mua sản phẩm tiếp theo: [${nextItem.title}] sau 4 giây...`, "warn");
+                if (typeof fsm !== 'undefined') fsm.transition(FSM_STATES.QUEUE_PROCESSING);
+                setTimeout(() => {
+                    if (nextItem.url || nextItem.orderUrl) {
+                        window.location.href = nextItem.url || nextItem.orderUrl;
+                    } else {
+                        window.location.href = "https://www.pokemoncenter-online.com/lottery-history/";
+                    }
+                }, gaussianRandom(4000, 500));
+            } else {
+                localStorage.removeItem("pk_winning_queue");
+                localStorage.removeItem("pk_auto_buy_queue_active");
+                syncStorageBridge("pk_winning_queue", []);
+                syncStorageBridge("pk_auto_buy_queue_active", "0");
+                if (typeof fsm !== 'undefined') fsm.transition(FSM_STATES.IDLE);
+                addLog("🏆🏆 TẤT CẢ SẢN PHẨM TRÚNG THƯỞNG TRONG HÀNG ĐỢI ĐÃ ĐƯỢC XỬ LÝ XONG!", "success");
+            }
+        } catch (e) {
+            console.error("[PK-BOT] Lỗi xử lý hàng đợi trúng thưởng:", e);
+        }
+    }
+
     // 9. Bấm nút Đặt trước (予約する) hoặc Thêm vào giỏ (カートに入れる) và sang Giỏ hàng (/cart/)
     async function addToCartAndCheckout() {
+        if (typeof fsm !== 'undefined') {
+            fsm.transition(FSM_STATES.PRODUCT_NAVIGATING);
+        }
+        updateStepperUI(3);
+
         // Kiểm tra xem trang có đang báo lỗi xung đột giỏ hàng không
         const conflictBefore = detectCartConflictError();
         if (conflictBefore.detected) {
-            addLog("⚠️ Phát hiện: Trong giỏ hàng đã có sẵn sản phẩm không thể gộp đơn!", "warn");
-            addLog("👉 Lỗi: '同時に注文できない商品がカートに投入されています。カートの商品を空にしてから、改めて注文してください。'", "warn");
-            addLog("🛒 Bot tự động chuyển ngay sang Giỏ hàng (https://www.pokemoncenter-online.com/cart/) để thanh toán sản phẩm này trước...", "success");
-            setTimeout(() => {
-                window.location.href = "https://www.pokemoncenter-online.com/cart/";
-            }, 1000);
+            handleCartConflictRecovery();
             return true;
         }
 
         let addBtn = findAddToCartButton();
         if (!addBtn) {
-            // Thử chờ và tìm lại tối đa 4 lần (mỗi lần 600ms) để hỗ trợ các trang load chậm / dynamic rendering
             for (let attempt = 1; attempt <= 4; attempt++) {
-                addLog(`⏳ Chưa thấy nút, đang quét lại lần ${attempt}/4...`, "info");
+                addLog(`⏳ Chưa thấy nút mua, đang quét lại lần ${attempt}/4...`, "info");
                 await new Promise(r => setTimeout(r, 600));
                 addBtn = findAddToCartButton();
                 if (addBtn) break;
@@ -2556,11 +3388,20 @@
         if (!addBtn) {
             const conflictAfterNoBtn = detectCartConflictError();
             if (conflictAfterNoBtn.detected) {
-                addLog("⚠️ Sản phẩm đã có trong giỏ hàng! Đang chuyển tới /cart/ để thanh toán...", "warn");
-                window.location.href = "https://www.pokemoncenter-online.com/cart/";
+                handleCartConflictRecovery();
                 return true;
             }
-            addLog("❌ Không tìm thấy nút '予約する' hoặc 'カートに入れる' (Có thể đã hết hạn hoặc hết hàng).", "err");
+
+            const outOfStockCheck = checkPdpOutOfStockOrExpired();
+            const queueActive = localStorage.getItem("pk_auto_buy_queue_active") === "1";
+            if (outOfStockCheck.expired || queueActive) {
+                addLog(`⚠️ Sản phẩm đã hết hạn hoặc hết hàng (${outOfStockCheck.reason || 'không tìm thấy nút mua'}).`, "warn");
+                addLog("⏭️ Tự động bỏ qua và chuyển sang sản phẩm tiếp theo trong hàng đợi...", "warn");
+                advanceSequentialQueue("EXPIRED_OR_OUT_OF_STOCK");
+                return false;
+            }
+
+            addLog("❌ Không tìm thấy nút '予約する' hoặc 'カートに入れる' trên trang sản phẩm.", "err");
             return false;
         }
 
@@ -2575,7 +3416,6 @@
         simulateMouseApproach(addBtn);
         addBtn.focus();
 
-        // Kích hoạt toàn diện các sự kiện chuột
         const mouseEvents = ['mouseenter', 'mouseover', 'mousedown', 'mouseup', 'click'];
         mouseEvents.forEach(evt => {
             try {
@@ -2586,14 +3426,12 @@
         try { addBtn.click(); } catch (e) {}
         if (window.$) try { window.$(addBtn).trigger('click'); } catch (e) {}
 
-        // Nếu là thẻ <a> có link thật
         if (addBtn.tagName === 'A' && addBtn.href && !addBtn.href.startsWith('javascript:') && !addBtn.href.startsWith('#')) {
             setTimeout(() => {
                 window.location.href = addBtn.href;
             }, 800);
         }
 
-        // Nếu nằm trong form submit
         const parentForm = addBtn.closest('form');
         if (parentForm && (addBtn.type === 'submit' || addBtn.tagName === 'BUTTON')) {
             try {
@@ -2611,23 +3449,17 @@
             if (conflict.detected) {
                 redirectedToCart = true;
                 clearInterval(checkConflictTimer);
-                addLog("⚠️ Website thông báo: Giỏ hàng đã có sản phẩm ('同時に注文できない商品がカートに投入されています')!", "warn");
-                addLog("🛒 Bot lập tức chuyển sang trang Giỏ hàng (/cart/) để thanh toán sản phẩm đang chờ trước...", "warn");
-                setTimeout(() => {
-                    window.location.href = "https://www.pokemoncenter-online.com/cart/";
-                }, 800);
+                handleCartConflictRecovery();
             }
         }, 350);
 
-        // Sau 2.2 giây nếu chưa chuyển sang giỏ hàng thì chủ động hỗ trợ chuyển tiếp
         setTimeout(() => {
             clearInterval(checkConflictTimer);
             if (redirectedToCart) return;
 
             const finalConflict = detectCartConflictError();
             if (finalConflict.detected) {
-                addLog("⚠️ Trong giỏ hàng đã có sẵn sản phẩm. Đang chuyển tới /cart/...", "warn");
-                window.location.href = "https://www.pokemoncenter-online.com/cart/";
+                handleCartConflictRecovery();
                 return;
             }
 
@@ -2657,6 +3489,7 @@
         // (Đây là tiêu chuẩn duy nhất xác định sản phẩm trúng thưởng ĐANG ĐƯỢC PHÉP MUA, loại trừ các đợt cũ)
         const actionBtns = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]')).filter(b => {
             if (b.closest('#pk-auto-bot-container')) return false;
+            if (b.disabled || b.classList.contains('disabled') || b.getAttribute('aria-disabled') === 'true') return false;
             const txt = (b.textContent || b.value || '').trim();
             return txt.includes('注文へ進む') || txt.includes('購入手続きへ') || txt.includes('予約へ進む');
         });
@@ -2665,6 +3498,12 @@
             const container = orderBtn.closest('.comBox, .history-item, .lottery-item, .card, tr, li, .item, .c-box, div[class*="lottery"], div[class*="item"]') ||
                               orderBtn.parentElement?.parentElement || orderBtn.parentElement;
             if (!container) return;
+
+            // Bỏ qua nếu mục trúng thưởng này đã hết hạn / đã kết thúc
+            const cText = container.textContent || '';
+            if (cText.includes('受付終了') || cText.includes('注文期限切れ') || cText.includes('購入期限切れ')) {
+                return;
+            }
 
             // Tránh trùng lặp
             if (winners.some(w => w.orderBtn === orderBtn || (w.container === container && w.orderBtn))) return;
@@ -2710,6 +3549,7 @@
                 id: idx + 1,
                 title: title,
                 orderUrl: orderUrl,
+                url: orderUrl,
                 orderBtn: orderBtn,
                 deadline: deadline,
                 container: container
@@ -2721,6 +3561,11 @@
 
     // 11. Quét kết quả xổ số (Xử lý trang /lottery-history/)
     function scanLotteryResults(autoStartBuy = false) {
+        if (typeof fsm !== 'undefined') {
+            fsm.transition(FSM_STATES.LOTTERY_SCANNING);
+        }
+        updateStepperUI(2);
+
         const path = window.location.pathname.toLowerCase();
 
         // Nếu người dùng đang ở /mypage/ mà chưa vào /lottery-history/
@@ -2804,14 +3649,23 @@
         const queue = winningItems.map((item, idx) => ({
             id: idx + 1,
             title: item.title,
+            orderUrl: item.orderUrl,
             url: item.orderUrl,
-            deadline: item.deadline
+            deadline: item.deadline,
+            attempts: 1
         }));
 
         localStorage.setItem("pk_winning_queue", JSON.stringify(queue));
         localStorage.setItem("pk_auto_buy_queue_active", "1");
         localStorage.setItem("pk_auto_checkout", "1"); // Tự động ở /cart/
         localStorage.setItem("pk_auto_order_steps", "1"); // Tự động duyệt qua shipping, payment
+        syncStorageBridge("pk_winning_queue", queue);
+        syncStorageBridge("pk_auto_buy_queue_active", "1");
+
+        if (typeof fsm !== 'undefined') {
+            fsm.transition(FSM_STATES.QUEUE_PROCESSING);
+        }
+        updateStepperUI(3);
 
         addLog(`🚀 ĐÃ KÍCH HOẠT HÀNG ĐỢI TỰ ĐỘNG MUA ${queue.length} SẢN PHẨM TRÚNG THƯỞNG!`, "warn");
         addLog(`📦 ĐANG MUA MÓN ĐẦU TIÊN (1/${queue.length}): [${queue[0].title}]...`, "info");
@@ -2851,6 +3705,9 @@
     function stopSequentialAutoBuy() {
         localStorage.removeItem("pk_winning_queue");
         localStorage.removeItem("pk_auto_buy_queue_active");
+        syncStorageBridge("pk_winning_queue", []);
+        syncStorageBridge("pk_auto_buy_queue_active", "0");
+        if (typeof fsm !== 'undefined') fsm.transition(FSM_STATES.IDLE);
         addLog("🛑 Đã dừng hàng đợi tự động mua hàng trúng thưởng.", "warn");
         const queueStatusEl = document.getElementById("pk-mypage-queue-status");
         if (queueStatusEl) {
@@ -2906,6 +3763,31 @@
                     </div>
                 </div>
 
+                <!-- THANH TIẾN TRÌNH STEPPER (6 BƯỚC) -->
+                <div id="pk-stepper-container" style="margin-bottom: 8px; padding: 6px 8px; background: #1e222d; border-radius: 6px; border: 1px solid #2f3542;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 11px;">
+                        <span style="color: #a4b0be; font-weight: 600;">Tiến trình tự động:</span>
+                        <span id="pk-stepper-current-info" style="color: #2ed573; font-weight: bold; font-size: 11px;">1. Đăng nhập</span>
+                    </div>
+                    <div id="pk-stepper-bar" style="display: flex; gap: 4px; align-items: center;">
+                        <div class="pk-stepper-step active" data-step="1" title="1. Đăng nhập / MFA"></div>
+                        <div class="pk-stepper-step" data-step="2" title="2. Quét kết quả"></div>
+                        <div class="pk-stepper-step" data-step="3" title="3. Đặt trước / Giỏ hàng"></div>
+                        <div class="pk-stepper-step" data-step="4" title="4. Địa chỉ giao hàng"></div>
+                        <div class="pk-stepper-step" data-step="5" title="5. Thanh toán"></div>
+                        <div class="pk-stepper-step" data-step="6" title="6. Chốt đơn"></div>
+                    </div>
+                </div>
+
+                <!-- THANH THAO TÁC NHANH (QUICK ACTIONS TOOLBAR) -->
+                <div id="pk-quick-actions-bar" style="display: flex; gap: 4px; margin-bottom: 8px;">
+                    <button type="button" id="pk-btn-quick-resume" class="pk-quick-btn" title="Tiếp tục chạy chu trình tự động" style="flex: 1; padding: 5px 6px; font-size: 11px; font-weight: 600; border-radius: 4px; border: 1px solid #2ed573; background: #1b4d3e; color: #2ed573; cursor: pointer;">▶ Chạy</button>
+                    <button type="button" id="pk-btn-quick-pause" class="pk-quick-btn" title="Tạm dừng bot" style="flex: 1; padding: 5px 6px; font-size: 11px; font-weight: 600; border-radius: 4px; border: 1px solid #ffa502; background: #4d3e1b; color: #ffa502; cursor: pointer;">⏸ Tạm dừng</button>
+                    <button type="button" id="pk-btn-quick-skip" class="pk-quick-btn" title="Bỏ qua món hiện tại trong hàng đợi" style="flex: 1; padding: 5px 6px; font-size: 11px; font-weight: 600; border-radius: 4px; border: 1px solid #70a1ff; background: #1e2e4a; color: #70a1ff; cursor: pointer;">⏭ Bỏ qua</button>
+                    <button type="button" id="pk-btn-quick-retry" class="pk-quick-btn" title="Thử lại bước hiện tại" style="flex: 1; padding: 5px 6px; font-size: 11px; font-weight: 600; border-radius: 4px; border: 1px solid #a4b0be; background: #2f3542; color: #f1f2f6; cursor: pointer;">🔄 Thử lại</button>
+                    <button type="button" id="pk-btn-quick-cart" class="pk-quick-btn" title="Mở giỏ hàng (/cart/)" style="flex: 1; padding: 5px 6px; font-size: 11px; font-weight: 600; border-radius: 4px; border: 1px solid #00cec9; background: #133e3d; color: #00cec9; cursor: pointer;">🛒 Giỏ hàng</button>
+                </div>
+
                 ${isMfaPage ? `
                     <!-- GIAO DIỆN TRANG NHẬP PASSCODE OTP -->
                     <div class="pk-status-box">
@@ -2933,6 +3815,7 @@
                         <span class="pk-logs-title">📋 KẾT QUẢ & NHẬT KÝ</span>
                         <div class="pk-logs-actions">
                             <button type="button" class="pk-logs-btn pk-btn-clear-logs" title="Xóa màn hình kết quả">🗑️ Xóa</button>
+                            <button type="button" class="pk-logs-btn pk-btn-download-logs" title="Tải xuống toàn bộ nhật ký dạng .txt">📥 Tải log</button>
                             <button type="button" class="pk-logs-btn pk-btn-expand-logs" title="Phóng to / Thu nhỏ ô kết quả">⛶ Phóng to</button>
                         </div>
                     </div>
@@ -2991,6 +3874,7 @@
                         <span class="pk-logs-title">📋 KẾT QUẢ & NHẬT KÝ</span>
                         <div class="pk-logs-actions">
                             <button type="button" class="pk-logs-btn pk-btn-clear-logs" title="Xóa màn hình kết quả">🗑️ Xóa</button>
+                            <button type="button" class="pk-logs-btn pk-btn-download-logs" title="Tải xuống toàn bộ nhật ký dạng .txt">📥 Tải log</button>
                             <button type="button" class="pk-logs-btn pk-btn-expand-logs" title="Phóng to / Thu nhỏ ô kết quả">⛶ Phóng to</button>
                         </div>
                     </div>
@@ -3035,6 +3919,7 @@
                         <span class="pk-logs-title">📋 KẾT QUẢ & NHẬT KÝ</span>
                         <div class="pk-logs-actions">
                             <button type="button" class="pk-logs-btn pk-btn-clear-logs" title="Xóa màn hình kết quả">🗑️ Xóa</button>
+                            <button type="button" class="pk-logs-btn pk-btn-download-logs" title="Tải xuống toàn bộ nhật ký dạng .txt">📥 Tải log</button>
                             <button type="button" class="pk-logs-btn pk-btn-expand-logs" title="Phóng to / Thu nhỏ ô kết quả">⛶ Phóng to</button>
                         </div>
                     </div>
@@ -3077,6 +3962,7 @@
                         <span class="pk-logs-title">📋 KẾT QUẢ & NHẬT KÝ</span>
                         <div class="pk-logs-actions">
                             <button type="button" class="pk-logs-btn pk-btn-clear-logs" title="Xóa màn hình kết quả">🗑️ Xóa</button>
+                            <button type="button" class="pk-logs-btn pk-btn-download-logs" title="Tải xuống toàn bộ nhật ký dạng .txt">📥 Tải log</button>
                             <button type="button" class="pk-logs-btn pk-btn-expand-logs" title="Phóng to / Thu nhỏ ô kết quả">⛶ Phóng to</button>
                         </div>
                     </div>
@@ -3115,6 +4001,7 @@
                         <span class="pk-logs-title">📋 KẾT QUẢ & NHẬT KÝ</span>
                         <div class="pk-logs-actions">
                             <button type="button" class="pk-logs-btn pk-btn-clear-logs" title="Xóa màn hình kết quả">🗑️ Xóa</button>
+                            <button type="button" class="pk-logs-btn pk-btn-download-logs" title="Tải xuống toàn bộ nhật ký dạng .txt">📥 Tải log</button>
                             <button type="button" class="pk-logs-btn pk-btn-expand-logs" title="Phóng to / Thu nhỏ ô kết quả">⛶ Phóng to</button>
                         </div>
                     </div>
@@ -3174,6 +4061,7 @@
                         <span class="pk-logs-title">📋 KẾT QUẢ & NHẬT KÝ</span>
                         <div class="pk-logs-actions">
                             <button type="button" class="pk-logs-btn pk-btn-clear-logs" title="Xóa màn hình kết quả">🗑️ Xóa</button>
+                            <button type="button" class="pk-logs-btn pk-btn-download-logs" title="Tải xuống toàn bộ nhật ký dạng .txt">📥 Tải log</button>
                             <button type="button" class="pk-logs-btn pk-btn-expand-logs" title="Phóng to / Thu nhỏ ô kết quả">⛶ Phóng to</button>
                         </div>
                     </div>
@@ -3248,6 +4136,7 @@
                             <span class="pk-logs-title">📋 KẾT QUẢ & NHẬT KÝ</span>
                             <div class="pk-logs-actions">
                                 <button type="button" class="pk-logs-btn pk-btn-clear-logs" title="Xóa màn hình kết quả">🗑️ Xóa</button>
+                                <button type="button" class="pk-logs-btn pk-btn-download-logs" title="Tải xuống toàn bộ nhật ký dạng .txt">📥 Tải log</button>
                                 <button type="button" class="pk-logs-btn pk-btn-expand-logs" title="Phóng to toàn màn hình / Thu nhỏ">⛶ Phóng to</button>
                             </div>
                         </div>
@@ -3326,6 +4215,64 @@
                 if (logBox) logBox.innerHTML = "";
             });
         });
+
+        // Nút tải xuống toàn bộ nhật ký bot dạng text file (.txt)
+        document.querySelectorAll(".pk-btn-download-logs").forEach(b => {
+            b.addEventListener("click", () => {
+                try {
+                    const textLines = LOG_HISTORY.map(entry => `[${entry.timeStr || new Date(entry.timestamp).toLocaleTimeString()}] [${(entry.level || 'info').toUpperCase()}] ${entry.message}`).join("\r\n");
+                    const blob = new Blob([textLines || "Chưa có log nào."], { type: "text/plain;charset=utf-8" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `pk_bot_logs_${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    addLog("📥 Đã xuất và tải xuống file nhật ký hoạt động bot.", "success");
+                } catch (err) {
+                    addLog("⚠️ Lỗi khi tải xuống nhật ký: " + err.message, "err");
+                }
+            });
+        });
+
+        // Thanh thao tác nhanh (Quick Actions Toolbar)
+        const quickResumeBtn = document.getElementById("pk-btn-quick-resume");
+        if (quickResumeBtn) {
+            quickResumeBtn.addEventListener("click", () => {
+                fsm.resume();
+            });
+        }
+
+        const quickPauseBtn = document.getElementById("pk-btn-quick-pause");
+        if (quickPauseBtn) {
+            quickPauseBtn.addEventListener("click", () => {
+                fsm.pause();
+            });
+        }
+
+        const quickSkipBtn = document.getElementById("pk-btn-quick-skip");
+        if (quickSkipBtn) {
+            quickSkipBtn.addEventListener("click", () => {
+                fsm.skip();
+            });
+        }
+
+        const quickRetryBtn = document.getElementById("pk-btn-quick-retry");
+        if (quickRetryBtn) {
+            quickRetryBtn.addEventListener("click", () => {
+                addLog("🔄 Thử lại bước hiện tại theo yêu cầu người dùng.", "info");
+                processCurrentStep();
+            });
+        }
+
+        const quickCartBtn = document.getElementById("pk-btn-quick-cart");
+        if (quickCartBtn) {
+            quickCartBtn.addEventListener("click", () => {
+                window.location.href = "https://www.pokemoncenter-online.com/cart/";
+            });
+        }
 
         // Dropdown chọn nick
         const accDropdown = document.getElementById("pk-acc-dropdown");
@@ -3645,6 +4592,11 @@
     // =========================================================================
 
     async function init() {
+        installNetworkSecurityInterceptor();
+        setupBridgeListener();
+        scanDomForSecurityBarriers();
+        setInterval(scanDomForSecurityBarriers, 2500);
+
         createWidget();
         await loadAccounts();
 
@@ -3652,12 +4604,24 @@
 
         // 1. Nếu đang ở trang đăng nhập
         if (path.includes("login") && !path.includes("mfa")) {
+            if (typeof fsm !== 'undefined') fsm.transition(FSM_STATES.LOGIN_IN_PROGRESS);
+            updateStepperUI(1);
+
             const activeAcc = getActiveAccount();
             const shouldAutoLogin = localStorage.getItem("pk_auto_login") === "1";
-            const hasRurl = window.location.search.includes('rurl=') || window.location.search.includes('redirect=');
+            const search = window.location.search;
+            const hasRurl = search.includes('rurl=') || search.includes('redirect=');
 
-            if (hasRurl) {
+            // F-13: Lưu ngữ cảnh khôi phục đơn hàng khi bị hết hạn phiên đăng nhập (Session Timeout)
+            if (hasRurl || document.referrer.includes('/order') || search.includes('rurl=10')) {
                 addLog("🔄 Phát hiện đăng nhập từ trang Đặt hàng (Checkout). Sau khi đăng nhập website sẽ tự động quay lại đơn hàng.", "info");
+                try {
+                    localStorage.setItem("pk_resume_context", JSON.stringify({
+                        source: 'checkout_session_timeout',
+                        timestamp: Date.now(),
+                        stage: 'placeOrder'
+                    }));
+                } catch (e) {}
             }
 
             // Tự động kiểm tra và chấm điểm Profile sau 1.2 giây
@@ -3682,7 +4646,9 @@
             }
         }
         // 2. Nếu đang ở trang nhập mã OTP
-        else if (path.includes("mfa") || path.includes("passcode")) {
+        else if (path.includes("mfa") || path.includes("passcode") || document.querySelector('#factor2AuthForm')) {
+            if (typeof fsm !== 'undefined') fsm.transition(FSM_STATES.MFA_PENDING);
+            updateStepperUI(1);
             hookResendButton();
             addLog("Đang ở trang xác thực OTP. Đang thử kết nối Gmail lấy mã sau 3 giây...", "info");
             setTimeout(() => {
@@ -3691,6 +4657,9 @@
         }
         // 3. Nếu đang ở trang Giỏ hàng (/cart/)
         else if (path.includes("/cart") || path.endsWith("/cart/")) {
+            if (typeof fsm !== 'undefined') fsm.transition(FSM_STATES.CART_REVIEW);
+            updateStepperUI(3);
+
             const queueStr = localStorage.getItem("pk_winning_queue");
             const queueActive = localStorage.getItem("pk_auto_buy_queue_active") === "1";
             if (queueActive && queueStr) {
@@ -3714,12 +4683,24 @@
         }
         // 4. Nếu đang ở trang Đặt hàng / Checkout (/order/ hoặc stage=...)
         else if (path.includes("/order") || window.location.search.includes("stage=")) {
+            // F-13: Khôi phục chu trình sau khi hết hạn phiên
+            try {
+                const resumeCtxStr = localStorage.getItem("pk_resume_context");
+                if (resumeCtxStr) {
+                    const resumeCtx = JSON.parse(resumeCtxStr);
+                    if (Date.now() - (resumeCtx.timestamp || 0) < 30 * 60 * 1000) {
+                        addLog("🔄 Khôi phục chu trình sau khi hết hạn phiên (Session Timeout Recovery) thành công!", "success");
+                    }
+                    localStorage.removeItem("pk_resume_context");
+                }
+            } catch (e) {}
+
             const stage = detectOrderStage();
             const stageLabels = {
-                'shipping': '🚚 Bước 1: Địa chỉ giao hàng',
-                'payment': '💳 Bước 2: Phương thức thanh toán',
-                'placeOrder': '📦 Bước 3: Xác nhận & Chốt đơn',
-                'complete': '🎉 Bước 4: Đặt hàng thành công',
+                'shipping': '🚚 Bước 4: Địa chỉ giao hàng',
+                'payment': '💳 Bước 5: Phương thức thanh toán',
+                'placeOrder': '📦 Bước 6: Xác nhận & Chốt đơn',
+                'complete': '🎉 Bước 6: Đặt hàng thành công',
                 'unknown': 'Đang kiểm tra'
             };
             const stageEl = document.getElementById("pk-order-current-stage");
@@ -3742,6 +4723,9 @@
         }
         // 5. Nếu đang ở trang chi tiết sản phẩm (/product/ hoặc p_cd= hoặc kết thúc bằng mã số 10-14 chữ số .html)
         else if (path.includes("/product") || window.location.search.includes("p_cd=") || /\/\d{10,14}\.html/.test(path)) {
+            if (typeof fsm !== 'undefined') fsm.transition(FSM_STATES.PRODUCT_NAVIGATING);
+            updateStepperUI(3);
+
             // Kiểm tra ngay xem giỏ hàng đã có sản phẩm xung đột hay chưa
             const checkInitialConflict = () => {
                 const conflict = detectCartConflictError();
@@ -3790,6 +4774,9 @@
         // 6. Nếu đang ở trang Lịch sử xổ số (/lottery-history/) hoặc MyPage (/mypage/)
         else if (path.includes("lottery-history") || path.includes("/mypage") || path.includes("history")) {
             const isLotteryHistory = path.includes("lottery-history");
+            if (typeof fsm !== 'undefined') fsm.transition(isLotteryHistory ? FSM_STATES.LOTTERY_SCANNING : FSM_STATES.IDLE);
+            updateStepperUI(2);
+
             if (isLotteryHistory) {
                 addLog("🏆 Đang ở trang Lịch sử xổ số (/lottery-history/).", "info");
             } else {
@@ -3831,6 +4818,7 @@
         }
         // 7. Nếu đang ở trang nộp đơn xổ số
         else if (path.includes("lottery/apply.html")) {
+            updateStepperUI(2);
             // Tải và hiển thị danh sách sản phẩm có checkbox để chọn ngay khi mở trang
             loadAndRenderProducts();
 

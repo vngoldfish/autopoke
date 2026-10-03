@@ -2,40 +2,323 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <title>Pokemon Center Lottery Bot</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pokémon Center Lottery & Checkout Bot</title>
     <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-    <div class="popup-container">
-        <div class="header">
-            <img src="icon.png" alt="icon" class="logo">
-            <div class="header-text">
-                <h3>Pokemon Center</h3>
-                <span>Auto Lottery Bot v1.0</span>
+    <div class="popup-wrapper">
+        <!-- TOP HEADER -->
+        <header class="popup-header">
+            <div class="header-brand">
+                <img src="icon.png" alt="Pokéball" class="brand-logo">
+                <div class="brand-info">
+                    <h1 class="brand-title">POKÉMON BOT</h1>
+                    <span class="brand-version">Lottery & Checkout • v2.0.0</span>
+                </div>
             </div>
-        </div>
-
-        <div class="content">
-            <div class="desc">
-                Tự động quét & nộp đơn bốc thăm (抽選販売) các sản phẩm thẻ bài Pokémon ngay sau khi đăng nhập.
+            <div class="header-status">
+                <span id="header-conn-badge" class="badge badge-idle">● Chờ kết nối</span>
             </div>
+        </header>
 
-            <div class="actions">
-                <button id="btn-open-page" class="btn btn-secondary">
-                    🌐 Mở trang Xổ số Pokémon
-                </button>
-                <button id="btn-run-now" class="btn btn-primary">
-                    ⚡ Kích hoạt Quét & Đăng ký
-                </button>
-            </div>
+        <!-- TAB NAVIGATION -->
+        <nav class="tab-nav">
+            <button class="tab-btn active" data-tab="tab-dashboard" id="btn-tab-dashboard">
+                <span class="tab-icon">📊</span>
+                <span class="tab-label">Trạng thái</span>
+            </button>
+            <button class="tab-btn" data-tab="tab-config" id="btn-tab-config">
+                <span class="tab-icon">⚙️</span>
+                <span class="tab-label">Cấu hình</span>
+            </button>
+            <button class="tab-btn" data-tab="tab-accounts" id="btn-tab-accounts">
+                <span class="tab-icon">👥</span>
+                <span class="tab-label">Tài khoản</span>
+            </button>
+        </nav>
 
-            <div id="status-msg" class="status-msg"></div>
-        </div>
+        <!-- TAB CONTENT CONTAINER -->
+        <main class="tab-content-container">
 
-        <div class="footer">
-            <span>Đã tối ưu hóa bảo mật & chống bot WAF</span>
-        </div>
+            <!-- ============================================================= -->
+            <!-- TAB 1: BẢNG ĐIỀU KHIỂN & TRẠNG THÁI                            -->
+            <!-- ============================================================= -->
+            <section id="tab-dashboard" class="tab-pane active">
+                <!-- Status Summary Card -->
+                <div class="card status-card">
+                    <div class="card-row">
+                        <span class="card-label">Trạng thái máy FSM:</span>
+                        <span id="badge-fsm-state" class="status-pill pill-idle">IDLE (Nghỉ)</span>
+                    </div>
+                    <div class="card-row">
+                        <span class="card-label">Bước hiện tại:</span>
+                        <span id="indicator-active-step" class="step-text">Bước 1/6: Đăng nhập</span>
+                    </div>
+                    <div class="card-row">
+                        <span class="card-label">Hàng đợi trúng:</span>
+                        <span id="badge-queue-count" class="queue-pill">0 sản phẩm</span>
+                    </div>
+                    <div class="card-row">
+                        <span class="card-label">Tài khoản đang dùng:</span>
+                        <span id="active-account-display" class="account-pill">Chưa chọn</span>
+                    </div>
+                </div>
+
+                <!-- Quick Action Buttons -->
+                <div class="section-title">Thao tác nhanh</div>
+                <div class="action-grid">
+                    <button id="btn-cmd-start" class="btn btn-action btn-start" title="Bắt đầu hoặc tiếp tục tự động">
+                        <span class="btn-icon">▶</span> Tiếp tục
+                    </button>
+                    <button id="btn-cmd-pause" class="btn btn-action btn-pause" title="Tạm dừng an toàn">
+                        <span class="btn-icon">⏸</span> Tạm dừng
+                    </button>
+                    <button id="btn-cmd-skip" class="btn btn-action btn-skip" title="Bỏ qua bước này">
+                        <span class="btn-icon">⏭</span> Bỏ qua
+                    </button>
+                    <button id="btn-cmd-retry" class="btn btn-action btn-retry" title="Thử lại bước hiện tại">
+                        <span class="btn-icon">🔄</span> Thử lại
+                    </button>
+                </div>
+
+                <!-- Quick Navigation Links -->
+                <div class="nav-links-grid">
+                    <button id="btn-link-lottery" class="btn btn-link" title="Mở trang bốc thăm xổ số">
+                        🌐 Trang Xổ Số
+                    </button>
+                    <button id="btn-link-history" class="btn btn-link" title="Mở lịch sử kết quả trúng thưởng">
+                        🏆 Kết Quả Trúng
+                    </button>
+                    <button id="btn-link-cart" class="btn btn-link" title="Mở giỏ hàng">
+                        🛒 Giỏ Hàng
+                    </button>
+                </div>
+
+                <!-- Recent Live Logs -->
+                <div class="logs-header">
+                    <span class="section-title">Nhật ký trực tiếp</span>
+                    <button id="btn-clear-logs" class="btn-text-action" title="Xóa danh sách hiển thị">🗑️ Xóa</button>
+                </div>
+                <div id="recent-log-box" class="log-container">
+                    <div class="log-empty">Chưa có nhật ký ghi nhận...</div>
+                </div>
+            </section>
+
+            <!-- ============================================================= -->
+            <!-- TAB 2: CẤU HÌNH TỰ ĐỘNG                                       -->
+            <!-- ============================================================= -->
+            <section id="tab-config" class="tab-pane">
+                <div class="config-group">
+                    <div class="group-header">Luồng Tự Động Hóa (Automation Flow)</div>
+
+                    <!-- Toggle: Auto Login -->
+                    <div class="config-item">
+                        <div class="config-info">
+                            <span class="config-title">Tự động đăng nhập</span>
+                            <span class="config-desc">Tự điền email/mật khẩu và gửi form tại trang login</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="cfg-auto-login">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+
+                    <!-- Toggle: Auto Scan Lottery -->
+                    <div class="config-item">
+                        <div class="config-info">
+                            <span class="config-title">Tự động quét kết quả</span>
+                            <span class="config-desc">Quét các mục trúng còn hạn tại /lottery-history/</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="cfg-auto-scan">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+
+                    <!-- Toggle: Sequential Auto-Buy -->
+                    <div class="config-item">
+                        <div class="config-info">
+                            <span class="config-title">Mua tuần tự hàng trúng</span>
+                            <span class="config-desc">Mua lần lượt từng sản phẩm một để tránh lỗi gộp đơn</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="cfg-sequential-buy">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+
+                    <!-- Toggle: Auto Order Steps -->
+                    <div class="config-item">
+                        <div class="config-info">
+                            <span class="config-title">Tự động duyệt thanh toán</span>
+                            <span class="config-desc">Tự động qua bước chọn địa chỉ & phương thức thanh toán</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="cfg-auto-checkout">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+
+                    <!-- Toggle: Safe Place Order Switch -->
+                    <div class="config-item highlight-item">
+                        <div class="config-info">
+                            <span class="config-title">Chốt đơn an toàn (Safe Switch)</span>
+                            <span class="config-desc">Dừng ở bước cuối cho người dùng duyệt tổng tiền (Khuyến nghị BẬT)</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="cfg-safe-place-order">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+
+                    <!-- Toggle: Auto Purge Cart on Conflict -->
+                    <div class="config-item">
+                        <div class="config-info">
+                            <span class="config-title">Tự dọn giỏ khi xung đột</span>
+                            <span class="config-desc">Tự động xóa giỏ hàng nếu gặp lỗi không thể gộp đơn</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="cfg-purge-cart">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Human Simulation Delays -->
+                <div class="config-group">
+                    <div class="group-header">Độ Trễ Giả Lập Con Người (Gaussian Delays)</div>
+
+                    <!-- Mean Delay Slider -->
+                    <div class="slider-item">
+                        <div class="slider-header">
+                            <span class="config-title">Độ trễ trung bình (&mu;):</span>
+                            <span id="val-delay-mean" class="slider-val">2000 ms</span>
+                        </div>
+                        <input type="range" id="cfg-delay-mean" min="500" max="5000" step="100" value="2000" class="range-slider">
+                        <div class="slider-limits">
+                            <span>500 ms</span>
+                            <span>5000 ms</span>
+                        </div>
+                    </div>
+
+                    <!-- StdDev Delay Slider -->
+                    <div class="slider-item">
+                        <div class="slider-header">
+                            <span class="config-title">Độ lệch chuẩn Gauss (&sigma;):</span>
+                            <span id="val-delay-stddev" class="slider-val">500 ms</span>
+                        </div>
+                        <input type="range" id="cfg-delay-stddev" min="100" max="2000" step="50" value="500" class="range-slider">
+                        <div class="slider-limits">
+                            <span>100 ms</span>
+                            <span>2000 ms</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="config-toast" class="toast hidden">✓ Đã lưu cài đặt và đồng bộ</div>
+            </section>
+
+            <!-- ============================================================= -->
+            <!-- TAB 3: QUẢN LÝ TÀI KHOẢN & HỒ SƠ                              -->
+            <!-- ============================================================= -->
+            <section id="tab-accounts" class="tab-pane">
+                <!-- Active Account Summary Card -->
+                <div class="card active-acc-card">
+                    <div class="card-header-small">
+                        <span class="card-tag">TÀI KHOẢN ĐANG KÍCH HOẠT</span>
+                    </div>
+                    <div class="active-acc-details">
+                        <div class="acc-row">
+                            <span class="acc-field-label">Tên:</span>
+                            <strong id="active-card-name" class="acc-field-value">-</strong>
+                        </div>
+                        <div class="acc-row">
+                            <span class="acc-field-label">Email Pokémon:</span>
+                            <span id="active-card-email" class="acc-field-value">-</span>
+                        </div>
+                        <div class="acc-row">
+                            <span class="acc-field-label">Mật khẩu:</span>
+                            <span id="active-card-pwd" class="acc-field-value masked-text">••••••••</span>
+                        </div>
+                        <div class="acc-row">
+                            <span class="acc-field-label">Email nhận OTP:</span>
+                            <span id="active-card-otp" class="acc-field-value">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Account Switcher Dropdown -->
+                <div class="switcher-box">
+                    <label for="select-account-switcher" class="section-title">Chuyển nhanh tài khoản:</label>
+                    <select id="select-account-switcher" class="dropdown-select">
+                        <option value="">-- Đang tải danh sách --</option>
+                    </select>
+                </div>
+
+                <!-- Account Manager Header -->
+                <div class="accounts-header">
+                    <span class="section-title">Danh sách tài khoản (<span id="acc-total-count">0</span>)</span>
+                    <button id="btn-toggle-add-form" class="btn btn-secondary btn-sm">
+                        + Thêm Tài Khoản
+                    </button>
+                </div>
+
+                <!-- Add / Edit Account Form (Collapsible) -->
+                <div id="account-form-panel" class="form-panel hidden">
+                    <div class="form-title" id="form-panel-title">Thêm tài khoản mới</div>
+                    <input type="hidden" id="input-acc-id">
+
+                    <div class="form-group">
+                        <label class="form-label" for="input-acc-name">Tên gợi nhớ:</label>
+                        <input type="text" id="input-acc-name" class="input-text" placeholder="Nick_1">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="input-acc-email">Email Pokémon Center:</label>
+                        <input type="email" id="input-acc-email" class="input-text" placeholder="email@gmail.com">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="input-acc-password">Mật khẩu Pokémon Center:</label>
+                        <div class="input-password-wrapper">
+                            <input type="password" id="input-acc-password" class="input-text" placeholder="••••••••">
+                            <button type="button" class="btn-toggle-pwd" data-target="input-acc-password" title="Hiện/Ẩn">👁</button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="input-acc-otp-email">Email nhận OTP (Gmail):</label>
+                        <input type="email" id="input-acc-otp-email" class="input-text" placeholder="email_otp@gmail.com">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="input-acc-app-password">Mật khẩu ứng dụng Gmail (16 ký tự):</label>
+                        <div class="input-password-wrapper">
+                            <input type="password" id="input-acc-app-password" class="input-text" placeholder="xxxx xxxx xxxx xxxx">
+                            <button type="button" class="btn-toggle-pwd" data-target="input-acc-app-password" title="Hiện/Ẩn">👁</button>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button id="btn-save-acc" class="btn btn-primary btn-sm">💾 Lưu Tài Khoản</button>
+                        <button id="btn-cancel-acc" class="btn btn-secondary btn-sm">✕ Hủy</button>
+                    </div>
+                </div>
+
+                <!-- Account List Cards Container -->
+                <div id="accounts-card-list" class="accounts-list">
+                    <!-- Populated dynamically by popup.js -->
+                </div>
+            </section>
+        </main>
+
+        <!-- FOOTER -->
+        <footer class="popup-footer">
+            <span>Tương thích Manifest V3 • Tối ưu WAF & Demandware</span>
+        </footer>
     </div>
+
     <script src="popup.js"></script>
 </body>
 </html>

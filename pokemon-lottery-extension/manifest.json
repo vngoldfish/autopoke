@@ -1,29 +1,32 @@
 {
   "manifest_version": 3,
-  "name": "Pokemon Center - Auto Lottery Bot",
-  "version": "1.0.0",
-  "description": "Tự động quét và đăng ký bốc thăm xổ số Pokémon Center Online Japan ngay sau khi đăng nhập",
+  "name": "Pokemon Center - Auto Lottery & Checkout Bot",
+  "version": "2.0.0",
+  "description": "Tự động quét & nộp đơn bốc thăm, kiểm tra kết quả và thanh toán tự động Pokémon Center Online Japan",
   "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
     "128": "icon.png"
   },
   "action": {
     "default_popup": "popup.html",
-    "default_icon": "icon.png"
+    "default_icon": "icon.png",
+    "default_title": "Pokémon Center Lottery & Checkout Bot"
   },
   "permissions": [
     "storage"
   ],
   "host_permissions": [
-    "https://www.pokemoncenter-online.com/*",
-    "https://id.pokemoncenter-online.com/*",
+    "*://www.pokemoncenter-online.com/*",
+    "*://id.pokemoncenter-online.com/*",
     "http://127.0.0.1:8765/*",
     "http://localhost:8765/*"
   ],
   "content_scripts": [
     {
       "matches": [
-        "https://www.pokemoncenter-online.com/*",
-        "https://id.pokemoncenter-online.com/*"
+        "*://www.pokemoncenter-online.com/*",
+        "*://id.pokemoncenter-online.com/*"
       ],
       "js": [
         "content.js"
@@ -35,14 +38,27 @@
     },
     {
       "matches": [
-        "https://www.pokemoncenter-online.com/*",
-        "https://id.pokemoncenter-online.com/*"
+        "*://www.pokemoncenter-online.com/*",
+        "*://id.pokemoncenter-online.com/*"
       ],
       "js": [
         "page_script.js"
       ],
       "world": "MAIN",
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "page_script.js",
+        "styles.css",
+        "icon.png"
+      ],
+      "matches": [
+        "*://www.pokemoncenter-online.com/*",
+        "*://id.pokemoncenter-online.com/*"
+      ]
     }
   ]
 }
