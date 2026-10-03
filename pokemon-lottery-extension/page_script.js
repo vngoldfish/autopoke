@@ -727,6 +727,408 @@
     }
 
     // =========================================================================
+    // HỆ THỐNG ĐÁNH GIÁ ĐIỂM TIN TƯỞNG PROFILE (ANTI-DETECT PROFILE AUDIT)
+    // Phân tích toàn diện: User-Agent, Cookie, Timezone, Incognito, Webdriver, F5 WAF
+    // =========================================================================
+
+    async function evaluateProfileTrustScore() {
+        const results = [];
+        let totalScore = 0;
+
+        // 1. Kiểm tra User-Agent & Version Mismatch (Tối đa 20 điểm)
+        const ua = navigator.userAgent || "";
+        const uad = navigator.userAgentData;
+        let uaScore = 20;
+        let uaStatus = "pass";
+        let uaDetail = "";
+        let uaTip = "";
+
+        const matchChromeUA = ua.match(/Chrome\/([0-9]+)/i);
+        const uaChromeVer = matchChromeUA ? parseInt(matchChromeUA[1], 10) : null;
+
+        let brandsChromeVer = null;
+        if (uad && uad.brands && Array.isArray(uad.brands)) {
+            const cBrand = uad.brands.find(b => {
+                const name = (b.brand || "").toLowerCase();
+                return name.includes("chromium") || name.includes("chrome") || name.includes("google chrome");
+            });
+            if (cBrand && cBrand.version) {
+                brandsChromeVer = parseInt(cBrand.version, 10);
+            }
+        }
+
+        if (ua.toLowerCase().includes("headless")) {
+            uaScore = 0;
+            uaStatus = "fail";
+            uaDetail = "Phát hiện HeadlessChrome! Dấu hiệu chắc chắn của bot tự động.";
+            uaTip = "Tắt cờ headless, mở Chrome giao diện người thật bình thường.";
+        } else if (uaChromeVer && brandsChromeVer && Math.abs(uaChromeVer - brandsChromeVer) > 2) {
+            uaScore = 0;
+            uaStatus = "fail";
+            uaDetail = `BẤT NHẤT PHIÊN BẢN: User-Agent là Chrome/${uaChromeVer} nhưng Client Hints là Chromium/${brandsChromeVer}!`;
+            uaTip = "Có extension (như Urban VPN) sửa đổi User-Agent gây lệch phiên bản. Hãy gỡ extension VPN và restart Chrome.";
+        } else if (uaChromeVer && uaChromeVer < 120) {
+            uaScore = 6;
+            uaStatus = "warn";
+            uaDetail = `Phiên bản Chrome hơi cũ: v${uaChromeVer} (khuyên dùng >= v125).`;
+            uaTip = "Hãy cập nhật trình duyệt Chrome lên phiên bản mới nhất.";
+        } else {
+            uaDetail = `User-Agent hợp lệ và nhất quán (Chrome v${uaChromeVer || "OK"}), không phát hiện giả mạo.`;
+        }
+
+        totalScore += uaScore;
+        results.push({
+            name: "User-Agent & Client Hints",
+            icon: "🧬",
+            status: uaStatus,
+            score: uaScore,
+            maxScore: 20,
+            detail: uaDetail,
+            tip: uaTip
+        });
+
+        // 2. Kiểm tra Cookie & Session WAF (Tối đa 25 điểm)
+        const rawCookies = document.cookie ? document.cookie.trim() : "";
+        const cookieList = rawCookies ? rawCookies.split(";").map(c => c.trim()).filter(Boolean) : [];
+        let cookieScore = 0;
+        let cookieStatus = "fail";
+        let cookieDetail = "";
+        let cookieTip = "";
+
+        if (cookieList.length === 0) {
+            cookieScore = 0;
+            cookieStatus = "fail";
+            cookieDetail = "Cookie hoàn toàn TRỐNG (0 cookie). F5 Volterra WAF sẽ coi đây là request không phiên và CHẶN 403 ngay!";
+            cookieTip = "Hãy mở trang chủ pokemoncenter-online.com lướt xem vài sản phẩm 5-10 phút để lưu cookie trước khi đăng nhập.";
+        } else if (cookieList.length < 4) {
+            cookieScore = 12;
+            cookieStatus = "warn";
+            cookieDetail = `Đã có ${cookieList.length} cookie. Phiên duyệt web còn mới, chưa có đủ độ ấm (warmup).`;
+            cookieTip = "Nên click xem 1-2 sản phẩm hoặc tin tức trên trang chủ để tích lũy thêm cookie tự nhiên.";
+        } else {
+            cookieScore = 25;
+            cookieStatus = "pass";
+            const hasGigya = cookieList.some(c => c.toLowerCase().includes("gigya") || c.toLowerCase().includes("gslb"));
+            const hasAnalytics = cookieList.some(c => c.startsWith("_ga") || c.startsWith("_pk"));
+            cookieDetail = `Đã có ${cookieList.length} cookie phiên. Dữ liệu duyệt web phong phú và tự nhiên.`;
+            if (hasGigya || hasAnalytics) {
+                cookieDetail += " (Có đầy đủ cookie theo dõi/phiên)";
+            }
+        }
+
+        totalScore += cookieScore;
+        results.push({
+            name: "Cookie & Session WAF",
+            icon: "🍪",
+            status: cookieStatus,
+            score: cookieScore,
+            maxScore: 25,
+            detail: cookieDetail,
+            tip: cookieTip
+        });
+
+        // 3. Kiểm tra Chế độ Ẩn danh (Incognito) (Tối đa 20 điểm)
+        let isIncognito = false;
+        let incognitoReason = "";
+        try {
+            if (navigator.storage && navigator.storage.estimate) {
+                const { quota } = await navigator.storage.estimate();
+                if (quota && quota < 2 * 1024 * 1024 * 1024 && cookieList.length === 0) {
+                    isIncognito = true;
+                    incognitoReason = "Storage quota nhỏ (<2GB) kèm theo 0 cookie.";
+                }
+            }
+        } catch (e) {}
+
+        if (cookieList.length === 0 && (!window.localStorage || window.localStorage.length === 0)) {
+            isIncognito = true;
+            incognitoReason = "Không có cookie và LocalStorage hoàn toàn trắng.";
+        }
+
+        let incognitoScore = 20;
+        let incognitoStatus = "pass";
+        let incognitoDetail = "Đang duyệt trên Profile Chrome thông thường (lưu trữ và lịch sử bền vững).";
+        let incognitoTip = "";
+
+        if (isIncognito) {
+            incognitoScore = 0;
+            incognitoStatus = "fail";
+            incognitoDetail = `Nghi vấn trình duyệt ẨN DANH (Incognito): ${incognitoReason || "Môi trường không lưu cookie"}.`;
+            incognitoTip = "TUYỆT ĐỐI KHÔNG dùng ẩn danh để login Pokémon! Hãy tạo một Profile Chrome thường riêng (ví dụ 'Pokemon JP') để nuôi tài khoản.";
+        }
+
+        totalScore += incognitoScore;
+        results.push({
+            name: "Chế độ duyệt web",
+            icon: "🕵️",
+            status: incognitoStatus,
+            score: incognitoScore,
+            maxScore: 20,
+            detail: incognitoDetail,
+            tip: incognitoTip
+        });
+
+        // 4. Múi giờ & Ngôn ngữ (Tối đa 15 điểm)
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+        const primaryLang = navigator.language || "";
+        const allLangs = navigator.languages || [primaryLang];
+
+        let tzScore = 0;
+        let tzStatus = "warn";
+        let tzTip = "";
+
+        if (tz === "Asia/Tokyo") {
+            tzScore += 10;
+        } else {
+            tzScore += 3;
+            tzTip += `Múi giờ hiện tại là "${tz}". Đối với website Nhật Bản, nên chỉnh múi giờ Windows thành "(UTC+09:00) Osaka, Sapporo, Tokyo". `;
+        }
+
+        const hasJapanese = allLangs.some(l => l.toLowerCase().startsWith("ja"));
+        if (hasJapanese) {
+            tzScore += 5;
+        } else {
+            tzScore += 1;
+            tzTip += `Ngôn ngữ Chrome hiện là "${primaryLang}". Khuyên dùng: thêm tiếng Nhật (日本語) vào đầu danh sách cài đặt ngôn ngữ Chrome.`;
+        }
+
+        if (tz === "Asia/Tokyo" && hasJapanese) {
+            tzStatus = "pass";
+        } else {
+            tzStatus = "warn";
+        }
+
+        totalScore += tzScore;
+        results.push({
+            name: "Múi giờ & Ngôn ngữ",
+            icon: "🕐",
+            status: tzStatus,
+            score: tzScore,
+            maxScore: 15,
+            detail: `Múi giờ: ${tz} | Ngôn ngữ: ${allLangs.slice(0, 3).join(", ")}`,
+            tip: tzTip
+        });
+
+        // 5. Cờ chống Bot (Webdriver & Automation) (Tối đa 10 điểm)
+        let botScore = 10;
+        let botStatus = "pass";
+        let botDetail = "Không phát hiện cờ điều khiển tự động (Webdriver / Selenium sạch).";
+        let botTip = "";
+
+        if (navigator.webdriver) {
+            botScore = 0;
+            botStatus = "fail";
+            botDetail = "CẢNH BÁO: Cờ navigator.webdriver = true! Trình duyệt đang bị nhận diện là công cụ tự động (Selenium/Puppeteer).";
+            botTip = "Hãy mở trình duyệt Chrome bằng tay từ desktop, không mở qua script tự động hóa.";
+        }
+
+        totalScore += botScore;
+        results.push({
+            name: "Cờ chống Bot (Webdriver)",
+            icon: "🤖",
+            status: botStatus,
+            score: botScore,
+            maxScore: 10,
+            detail: botDetail,
+            tip: botTip
+        });
+
+        // 6. Cảm biến F5 WAF & Gigya (Tối đa 10 điểm)
+        let f5Score = 10;
+        let f5Status = "pass";
+        let f5Detail = "";
+        let f5Tip = "";
+
+        const gigyaLoaded = !!(window.gigya && window.gigya.accounts);
+        const recaptchaScript = !!document.querySelector('script[src*="recaptcha"]');
+        const f5Active = !!(document.querySelector('script[src*="sso.htm"]') || window.gigya || document.querySelector('script[src*="gigya"]'));
+
+        if (gigyaLoaded) {
+            f5Detail = "Thư viện bảo mật Gigya & F5 sensor đã sẵn sàng xử lý yêu cầu.";
+        } else if (f5Active || recaptchaScript) {
+            f5Score = 7;
+            f5Status = "warn";
+            f5Detail = "Thư viện bảo mật đang trong quá trình tải. Hãy đợi thêm vài giây.";
+            f5Tip = "Đợi 3-5 giây cho trang hoàn tất khởi tạo trước khi đăng nhập.";
+        } else {
+            f5Score = 3;
+            f5Status = "warn";
+            f5Detail = "Chưa phát hiện bộ giải mã Gigya/reCAPTCHA trên trang.";
+            f5Tip = "Đảm bảo bạn đang ở đúng trang đăng nhập của Pokémon Center.";
+        }
+
+        totalScore += f5Score;
+        results.push({
+            name: "Cảm biến F5 WAF & Gigya",
+            icon: "📡",
+            status: f5Status,
+            score: f5Score,
+            maxScore: 10,
+            detail: f5Detail,
+            tip: f5Tip
+        });
+
+        // Phân loại Level & Màu sắc
+        let level = "excellent";
+        let levelText = "RẤT AN TOÀN";
+        let color = "#2ed573";
+        let summary = "Profile có độ tin cậy cao, đầy đủ cookie và thông số tự nhiên. Sẵn sàng đăng nhập an toàn!";
+
+        if (totalScore < 60) {
+            level = "danger";
+            levelText = "NGUY HIỂM (DỄ BỊ 403)";
+            color = "#ff4757";
+            summary = "Phát hiện nhiều bất thường (thiếu cookie, ẩn danh, hoặc lệch User-Agent). KHÔNG NÊN đăng nhập lúc này kẻo bị WAF chặn!";
+        } else if (totalScore < 85) {
+            level = "warning";
+            levelText = "TRUNG BÌNH (CẦN TỐI ƯU)";
+            color = "#ffa502";
+            summary = "Profile có thể đăng nhập được nhưng chưa tối ưu (thiếu cookie dày, múi giờ chưa khớp Tokyo...). Nên làm theo hướng dẫn khắc phục.";
+        }
+
+        return {
+            score: totalScore,
+            level,
+            levelText,
+            color,
+            summary,
+            items: results
+        };
+    }
+
+    function updateTrustScoreUI(auditData) {
+        if (!auditData) return;
+
+        const box = document.getElementById("pk-trust-box");
+        const badge = document.getElementById("pk-trust-badge");
+        const fill = document.getElementById("pk-trust-bar-fill");
+        const scoreNum = document.getElementById("pk-trust-score-num");
+        const brief = document.getElementById("pk-trust-brief");
+        const headerBtn = document.getElementById("pk-audit-header-btn");
+
+        if (box) {
+            box.className = `pk-trust-box ${auditData.level}`;
+        }
+        if (badge) {
+            badge.className = `pk-trust-badge ${auditData.level}`;
+            badge.textContent = auditData.levelText;
+        }
+        if (fill) {
+            fill.className = `pk-trust-bar-fill ${auditData.level}`;
+            fill.style.width = `${Math.min(100, Math.max(5, auditData.score))}%`;
+        }
+        if (scoreNum) {
+            scoreNum.textContent = `${auditData.score}/100`;
+            scoreNum.style.color = auditData.color;
+        }
+        if (brief) {
+            brief.textContent = auditData.summary;
+        }
+        if (headerBtn) {
+            headerBtn.title = `Điểm tin tưởng Profile: ${auditData.score}/100 (${auditData.levelText})`;
+        }
+    }
+
+    function openProfileAuditModal(auditData) {
+        if (!auditData) return;
+        const oldModal = document.getElementById("pk-audit-modal-overlay");
+        if (oldModal) oldModal.remove();
+
+        const overlay = document.createElement("div");
+        overlay.id = "pk-audit-modal-overlay";
+        overlay.className = "pk-modal-overlay";
+
+        overlay.innerHTML = `
+            <div class="pk-audit-modal-content">
+                <div class="pk-audit-modal-header">
+                    <span style="font-weight: bold; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+                        🛡️ Báo Cáo Đánh Giá Độ Tin Tưởng Profile (Anti-Bot Check)
+                    </span>
+                    <button id="pk-audit-close-btn" style="background: none; border: none; color: #a4b0be; font-size: 18px; cursor: pointer;">✕</button>
+                </div>
+                <div class="pk-audit-modal-body">
+                    <!-- Banner điểm số -->
+                    <div class="pk-audit-score-banner" style="border-color: ${auditData.color}40;">
+                        <div class="pk-audit-score-circle" style="border-color: ${auditData.color}; color: ${auditData.color};">
+                            <span>${auditData.score}</span>
+                            <span style="font-size: 10px; font-weight: 500; color: #a4b0be; margin-top: -3px;">/ 100</span>
+                        </div>
+                        <div style="flex: 1;">
+                            <div style="font-weight: 800; font-size: 15px; color: ${auditData.color}; margin-bottom: 3px;">
+                                ${auditData.levelText}
+                            </div>
+                            <div style="font-size: 11.5px; color: #ced6e0; line-height: 1.4;">
+                                ${auditData.summary}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Danh sách các hạng mục kiểm tra -->
+                    <div style="font-weight: 700; color: #ffa502; font-size: 12px; margin-top: 2px;">
+                        📋 CHI TIẾT 6 TIÊU CHÍ BẢO MẬT & CHỐNG BOT:
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        ${auditData.items.map(item => `
+                            <div class="pk-audit-item-row ${item.status}">
+                                <div class="pk-audit-item-top">
+                                    <div class="pk-audit-item-name">
+                                        <span>${item.icon}</span>
+                                        <span>${item.name}</span>
+                                    </div>
+                                    <div class="pk-audit-item-score" style="color: ${item.status === 'pass' ? '#2ed573' : item.status === 'warn' ? '#ffa502' : '#ff4757'};">
+                                        ${item.status === 'pass' ? '✅' : item.status === 'warn' ? '⚠️' : '❌'} +${item.score}/${item.maxScore} điểm
+                                    </div>
+                                </div>
+                                <div class="pk-audit-item-detail">
+                                    ${item.detail}
+                                </div>
+                                ${item.tip ? `
+                                    <div class="pk-audit-item-tip">
+                                        <b>💡 Cách khắc phục:</b> ${item.tip}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `).join("")}
+                    </div>
+
+                    <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; padding-top: 8px; border-top: 1px solid #3e4451;">
+                        <button id="pk-modal-rescan-btn" style="padding: 7px 14px; background: linear-gradient(135deg, #1e90ff, #0984e3); border: none; border-radius: 6px; color: #fff; font-weight: 600; cursor: pointer; font-size: 12px;">
+                            🔄 Quét lại ngay
+                        </button>
+                        <button id="pk-modal-close-action" style="padding: 7px 16px; background: #57606f; border: none; border-radius: 6px; color: #fff; cursor: pointer; font-size: 12px;">
+                            Đóng
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        const closeBtn = document.getElementById("pk-audit-close-btn");
+        if (closeBtn) closeBtn.addEventListener("click", () => overlay.remove());
+
+        const closeAction = document.getElementById("pk-modal-close-action");
+        if (closeAction) closeAction.addEventListener("click", () => overlay.remove());
+
+        overlay.addEventListener("click", (e) => {
+            if (e.target === overlay) overlay.remove();
+        });
+
+        const rescanBtn = document.getElementById("pk-modal-rescan-btn");
+        if (rescanBtn) {
+            rescanBtn.addEventListener("click", async () => {
+                rescanBtn.textContent = "⏳ Đang quét...";
+                rescanBtn.disabled = true;
+                const newAudit = await evaluateProfileTrustScore();
+                updateTrustScoreUI(newAudit);
+                openProfileAuditModal(newAudit);
+            });
+        }
+    }
+
+    // =========================================================================
     // XỬ LÝ NHẬP MÃ PASSCODE OTP (MFA)
     // =========================================================================
 
@@ -1535,6 +1937,7 @@
                     <span>⚡ PKM Auto Lottery</span>
                 </div>
                 <div class="pk-controls">
+                    <button class="pk-btn-icon" id="pk-audit-header-btn" title="Chấm điểm Profile (Anti-Bot Check)">🛡️</button>
                     <button class="pk-btn-icon" id="pk-expand-btn" title="Phóng to / Thu nhỏ giao diện">⛶</button>
                     <button class="pk-btn-icon" id="pk-toggle-btn" title="Thu nhỏ/Mở rộng">−</button>
                 </div>
@@ -1599,6 +2002,29 @@
                             <span class="pk-status-val success" id="pk-login-acc-otp-mail">--</span>
                         </div>
                     </div>
+
+                    <!-- KHỐI CHẤM ĐIỂM ĐỘ TIN TƯỞNG PROFILE -->
+                    <div id="pk-trust-box" class="pk-trust-box">
+                        <div class="pk-trust-header">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="font-size: 14px;">🛡️</span>
+                                <span style="font-weight: bold; color: #f1f2f6; font-size: 11.5px;">ĐỘ TIN TƯỞNG PROFILE:</span>
+                            </div>
+                            <span id="pk-trust-badge" class="pk-trust-badge loading">Đang kiểm tra...</span>
+                        </div>
+                        <div class="pk-trust-meter-container">
+                            <div class="pk-trust-bar-bg">
+                                <div id="pk-trust-bar-fill" class="pk-trust-bar-fill"></div>
+                            </div>
+                            <span id="pk-trust-score-num" class="pk-trust-score-num">--/100</span>
+                        </div>
+                        <div id="pk-trust-brief" class="pk-trust-brief">Đang phân tích User-Agent, Cookie, Timezone, Ẩn danh...</div>
+                        <div style="display: flex; gap: 6px; margin-top: 2px;">
+                            <button type="button" id="pk-btn-open-audit" class="pk-btn-audit">🩺 Xem Chi Tiết Báo Cáo</button>
+                            <button type="button" id="pk-btn-rescan-trust" class="pk-btn-audit" style="flex: 0.45; background: #3e4451;">🔄 Quét lại</button>
+                        </div>
+                    </div>
+
                     <div class="pk-row" style="padding: 2px 0;">
                         <span class="pk-switch-label" style="font-size: 11px;">Tự đăng nhập khi mở trang:</span>
                         <label class="pk-switch">
@@ -1786,11 +2212,54 @@
             });
         }
 
+        // Nút đánh giá Profile trên thanh Header
+        const headerAuditBtn = document.getElementById("pk-audit-header-btn");
+        if (headerAuditBtn) {
+            headerAuditBtn.addEventListener("click", async (e) => {
+                e.stopPropagation();
+                addLog("🩺 Đang phân tích độ tin tưởng Profile hiện tại...", "info");
+                const auditData = await evaluateProfileTrustScore();
+                updateTrustScoreUI(auditData);
+                openProfileAuditModal(auditData);
+            });
+        }
+
+        // Nút mở báo cáo chi tiết & nút quét lại Profile
+        const btnOpenAudit = document.getElementById("pk-btn-open-audit");
+        if (btnOpenAudit) {
+            btnOpenAudit.addEventListener("click", async () => {
+                addLog("Đang chạy kiểm tra chi tiết profile...", "info");
+                const auditData = await evaluateProfileTrustScore();
+                updateTrustScoreUI(auditData);
+                openProfileAuditModal(auditData);
+            });
+        }
+
+        const btnRescanTrust = document.getElementById("pk-btn-rescan-trust");
+        if (btnRescanTrust) {
+            btnRescanTrust.addEventListener("click", async () => {
+                btnRescanTrust.textContent = "⏳...";
+                const auditData = await evaluateProfileTrustScore();
+                updateTrustScoreUI(auditData);
+                btnRescanTrust.textContent = "🔄 Quét lại";
+                addLog(`Đã quét lại profile: ${auditData.score}/100 điểm [${auditData.levelText}].`, auditData.level === "excellent" ? "success" : auditData.level === "warning" ? "warn" : "err");
+            });
+        }
+
         // Xử lý trang Đăng nhập
         const btnDoLogin = document.getElementById("pk-btn-do-login");
         if (btnDoLogin) {
             btnDoLogin.addEventListener("click", async () => {
                 const acc = getActiveAccount();
+
+                // Đánh giá nhanh điểm trước khi bắt đầu
+                const audit = await evaluateProfileTrustScore();
+                updateTrustScoreUI(audit);
+                if (audit.score < 60) {
+                    addLog(`⚠️ CẢNH BÁO NGUY CƠ CAO: Profile chỉ đạt ${audit.score}/100 điểm!`, "err");
+                    addLog(`⚠️ Dễ bị F5 WAF chặn 403. Bạn nên bấm [🩺 Xem Chi Tiết Báo Cáo] để khắc phục trước.`, "warn");
+                }
+
                 btnDoLogin.disabled = true;
                 btnDoLogin.textContent = "⌨️ Đang gõ phím...";
                 await fillLoginForm(acc);
@@ -1925,6 +2394,16 @@
         if (path.includes("login") && !path.includes("mfa")) {
             const activeAcc = getActiveAccount();
             const shouldAutoLogin = localStorage.getItem("pk_auto_login") === "1";
+
+            // Tự động kiểm tra và chấm điểm Profile sau 1.2 giây
+            setTimeout(async () => {
+                const audit = await evaluateProfileTrustScore();
+                updateTrustScoreUI(audit);
+                addLog(`🛡️ Đã đánh giá Profile: ${audit.score}/100 điểm [${audit.levelText}]`, audit.level === "excellent" ? "success" : audit.level === "warning" ? "warn" : "err");
+                if (audit.score < 60) {
+                    addLog(`⚠️ CẢNH BÁO: Điểm Profile thấp (${audit.score}/100). Dễ bị F5 WAF chặn 403! Bấm "🩺 Xem Chi Tiết Báo Cáo" để xem hướng dẫn sửa.`, "warn");
+                }
+            }, 1200);
 
             if (shouldAutoLogin && activeAcc) {
                 // Đợi 5 giây cho F5 WAF telemetry scripts khởi tạo xong
