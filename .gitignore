@@ -14,6 +14,7 @@ screenshots/
 *.har
 *.log
 accounts.json
+err/
 
 # Python
 __pycache__/

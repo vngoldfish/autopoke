@@ -172,6 +172,18 @@
         if (mfaName) mfaName.textContent = acc.name || acc.pokemon_email;
         const mfaOtpMail = document.getElementById("pk-mfa-acc-otp-mail");
         if (mfaOtpMail) mfaOtpMail.textContent = acc.otp_email || acc.pokemon_email || "--";
+
+        // Trên trang Giỏ hàng
+        const cartName = document.getElementById("pk-cart-acc-name");
+        if (cartName) cartName.textContent = acc.name || acc.pokemon_email;
+
+        // Trên trang Đặt hàng / Checkout
+        const orderName = document.getElementById("pk-order-acc-name");
+        if (orderName) orderName.textContent = acc.name || acc.pokemon_email;
+
+        // Trên trang Sản phẩm
+        const prodName = document.getElementById("pk-prod-acc-name");
+        if (prodName) prodName.textContent = acc.name || acc.pokemon_email;
     }
 
     // =========================================================================
@@ -365,7 +377,8 @@
     // =========================================================================
 
     function findLoginEmailInput() {
-        return document.querySelector('#loginId') ||
+        return document.querySelector('#login-form-email') ||
+               document.querySelector('#loginId') ||
                document.querySelector('input[name="loginID"]') ||
                document.querySelector('input[name="email"]') ||
                document.querySelector('input[type="email"]') ||
@@ -378,15 +391,19 @@
     }
 
     function findLoginPasswordInput() {
-        return document.querySelector('#password') ||
+        return document.querySelector('#current-password') ||
+               document.querySelector('#password') ||
                document.querySelector('input[name="password"]') ||
                document.querySelector('input[type="password"]') ||
                document.querySelector('input[placeholder*="パスワード"]');
     }
 
     function findLoginSubmitButton() {
-        // Ưu tiên 1: Cấu trúc chính xác trên Pokémon Center Online (div.comLoginBox a.btn.loginBtn)
-        const specific = document.querySelector('.comLoginBox a.loginBtn') ||
+        // Ưu tiên 1: Nút Storefront SFCC (#form1Button) hoặc nút Lottery (div.comLoginBox a.btn.loginBtn)
+        const specific = document.querySelector('#form1Button') ||
+                         document.querySelector('button#form1Button') ||
+                         document.querySelector('form#login-form button[type="submit"]') ||
+                         document.querySelector('.comLoginBox a.loginBtn') ||
                          document.querySelector('.comLoginBox .loginBtn') ||
                          document.querySelector('.comLoginBox a.btn') ||
                          document.querySelector('a.loginBtn') ||
@@ -747,6 +764,10 @@
         loginBtn.click();
         if (window.$) {
             try { window.$(loginBtn).trigger('click'); } catch (e) {}
+            try {
+                const form = loginBtn.closest('form');
+                if (form) window.$(form).trigger('submit');
+            } catch (e) {}
         }
 
         // Backup: Kích hoạt submit form nếu là form tiêu chuẩn
@@ -1990,6 +2011,248 @@
     }
 
     // =========================================================================
+    // HỆ THỐNG TỰ ĐỘNG ĐẶT HÀNG & THANH TOÁN (AUTO CHECKOUT & ORDER ENGINE)
+    // =========================================================================
+
+    // 1. Tìm nút Tiến hành đặt hàng trong trang Giỏ hàng (/cart/)
+    function findCartCheckoutButton() {
+        return document.querySelector('.checkout-btn') ||
+               document.querySelector('a.checkout-btn') ||
+               document.querySelector('button.checkout-btn') ||
+               document.querySelector('a[href*="/order/"]') ||
+               document.querySelector('a[href*="stage="]') ||
+               Array.from(document.querySelectorAll('a, button')).find(b => {
+                   if (b.closest('#pk-auto-bot-container') || b.closest('header') || b.closest('#header')) return false;
+                   const txt = (b.textContent || b.value || '').trim();
+                   return txt.includes('ご注文手続きへ') || txt.includes('レジに進む') || txt.includes('購入手続きへ');
+               });
+    }
+
+    // 2. Chuyển từ giỏ hàng sang bước đặt hàng
+    async function proceedCartToCheckout() {
+        const btn = findCartCheckoutButton();
+        if (!btn) {
+            addLog("⚠️ Không tìm thấy nút đặt hàng (ご注文手続きへ) hoặc giỏ hàng đang trống.", "warn");
+            return false;
+        }
+
+        addLog("🛒 Đang di chuột tới nút 'Tiến hành đặt hàng'...", "info");
+        btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        btn.style.outline = "4px solid #00cec9";
+        btn.style.outlineOffset = "3px";
+        btn.style.boxShadow = "0 0 25px rgba(0, 206, 201, 0.7)";
+
+        await new Promise(r => setTimeout(r, gaussianRandom(500, 100)));
+        simulateMouseApproach(btn);
+        btn.focus();
+        btn.click();
+        if (window.$) {
+            try { window.$(btn).trigger('click'); } catch (e) {}
+        }
+
+        // Nếu là thẻ <a> có href chuyển hướng
+        if (btn.tagName === 'A' && btn.getAttribute('href') && !btn.getAttribute('href').startsWith('#') && !btn.getAttribute('href').startsWith('javascript:')) {
+            window.location.href = btn.href;
+        }
+
+        addLog("🚀 Đã kích hoạt chuyển sang trang Đặt hàng / Thanh toán!", "success");
+        return true;
+    }
+
+    // 3. Nhận diện giai đoạn đặt hàng hiện tại (/order/)
+    function detectOrderStage() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const stageParam = urlParams.get('stage') || '';
+
+        if (stageParam === 'placeOrder' || document.querySelector('button.place-order, .place-order') || Array.from(document.querySelectorAll('button')).some(b => b.textContent.includes('注文を確定する'))) {
+            return 'placeOrder';
+        }
+        if (stageParam === 'payment' || document.querySelector('button.submit-payment, .submit-payment') || Array.from(document.querySelectorAll('button')).some(b => b.textContent.includes('ご注文内容の確認へ') || b.textContent.includes('確認画面へ'))) {
+            return 'payment';
+        }
+        if (stageParam === 'shipping' || document.querySelector('button.submit-shipping, .submit-shipping') || Array.from(document.querySelectorAll('button')).some(b => b.textContent.includes('お支払い方法の選択へ') || b.textContent.includes('配送先を決定'))) {
+            return 'shipping';
+        }
+        if (document.querySelector('.order-confirmation, .receipt, .order-thank-you-msg') || Array.from(document.querySelectorAll('h1, h2, h3, p')).some(el => el.textContent.includes('ご注文ありがとうございました'))) {
+            return 'complete';
+        }
+        return stageParam || 'unknown';
+    }
+
+    // 4. Tìm nút xác nhận địa chỉ giao hàng (Stage: Shipping)
+    function findShippingNextButton() {
+        return document.querySelector('button.submit-shipping') ||
+               document.querySelector('button[name="submit"][value="shipping"]') ||
+               document.querySelector('.submit-shipping') ||
+               Array.from(document.querySelectorAll('button, a')).find(b => {
+                   if (b.closest('#pk-auto-bot-container')) return false;
+                   const txt = (b.textContent || b.value || '').trim();
+                   return txt.includes('お支払い方法の選択へ') || txt.includes('お支払い方法へ') || txt.includes('配送先を決定') || txt.includes('次へ進む');
+               });
+    }
+
+    // 5. Tìm nút xác nhận thanh toán (Stage: Payment)
+    function findPaymentNextButton() {
+        return document.querySelector('button.submit-payment') ||
+               document.querySelector('button[name="submit"][value="payment"]') ||
+               document.querySelector('.submit-payment') ||
+               Array.from(document.querySelectorAll('button, a')).find(b => {
+                   if (b.closest('#pk-auto-bot-container')) return false;
+                   const txt = (b.textContent || b.value || '').trim();
+                   return txt.includes('ご注文内容の確認へ') || txt.includes('注文内容の確認へ') || txt.includes('確認画面へ');
+               });
+    }
+
+    // 6. Tìm nút Chốt đơn cuối cùng (Stage: Place Order)
+    function findPlaceOrderButton() {
+        return document.querySelector('button.place-order') ||
+               document.querySelector('button[name="submit"][value="place-order"]') ||
+               document.querySelector('.place-order') ||
+               document.querySelector('button.placeOrderBtn') ||
+               Array.from(document.querySelectorAll('button')).find(b => {
+                   if (b.closest('#pk-auto-bot-container')) return false;
+                   const txt = (b.textContent || b.value || '').trim();
+                   return txt.includes('注文を確定する') || txt.includes('購入を確定する') || txt.includes('注文完了');
+               });
+    }
+
+    // 7. Tìm nút Thêm vào giỏ trên trang sản phẩm
+    function findAddToCartButton() {
+        return document.querySelector('button.add-to-cart') ||
+               document.querySelector('button.add-to-cart-global') ||
+               document.querySelector('.product-detail .add-to-cart') ||
+               document.querySelector('#add-to-cart') ||
+               Array.from(document.querySelectorAll('button')).find(b => {
+                   if (b.closest('#pk-auto-bot-container')) return false;
+                   const txt = (b.textContent || b.value || '').trim();
+                   return txt.includes('カートに入れる');
+               });
+    }
+
+    // 8. Tự động xử lý từng bước của quá trình đặt hàng (/order/)
+    async function processOrderStep(force = false) {
+        const stage = detectOrderStage();
+
+        if (stage === 'shipping') {
+            addLog("🚚 Đang ở bước: Xác nhận Địa chỉ nhận hàng (stage=shipping)...", "info");
+            const nextBtn = findShippingNextButton();
+            if (!nextBtn) {
+                addLog("⚠️ Chưa thấy nút chuyển bước thanh toán (submit-shipping).", "warn");
+                return false;
+            }
+
+            nextBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            nextBtn.style.outline = "4px solid #1e90ff";
+            await new Promise(r => setTimeout(r, gaussianRandom(600, 120)));
+            simulateMouseApproach(nextBtn);
+            nextBtn.focus();
+            nextBtn.click();
+            if (window.$) try { window.$(nextBtn).trigger('click'); } catch (e) {}
+            addLog("✅ Đã xác nhận Địa chỉ! Đang chuyển sang bước Phương thức thanh toán...", "success");
+            return true;
+        }
+
+        if (stage === 'payment') {
+            addLog("💳 Đang ở bước: Phương thức thanh toán (stage=payment)...", "info");
+            const nextBtn = findPaymentNextButton();
+            if (!nextBtn) {
+                addLog("⚠️ Chưa thấy nút chuyển sang xem lại đơn hàng (submit-payment).", "warn");
+                return false;
+            }
+
+            nextBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            nextBtn.style.outline = "4px solid #1e90ff";
+            await new Promise(r => setTimeout(r, gaussianRandom(600, 120)));
+            simulateMouseApproach(nextBtn);
+            nextBtn.focus();
+            nextBtn.click();
+            if (window.$) try { window.$(nextBtn).trigger('click'); } catch (e) {}
+            addLog("✅ Đã xác nhận Thanh toán! Đang chuyển sang bước Xem lại & Chốt đơn...", "success");
+            return true;
+        }
+
+        if (stage === 'placeOrder') {
+            addLog("📦 Đang ở bước cuối: Xác nhận & Chốt đơn hàng (stage=placeOrder)...", "warn");
+
+            // Tự động tích chọn checkbox đồng ý điều khoản mua sắm (nếu có)
+            document.querySelectorAll('input[type="checkbox"]').forEach(chk => {
+                if (chk.closest('#pk-auto-bot-container')) return;
+                const parentText = chk.closest('label')?.textContent || chk.parentElement?.textContent || '';
+                if (parentText.includes('同意') || parentText.includes('規約') || (chk.name && chk.name.includes('agree'))) {
+                    if (!chk.checked) {
+                        chk.checked = true;
+                        chk.dispatchEvent(new Event('change', { bubbles: true }));
+                        addLog("☑️ Đã tự động tích chọn đồng ý điều khoản đặt hàng.", "info");
+                    }
+                }
+            });
+
+            const placeBtn = findPlaceOrderButton();
+            if (!placeBtn) {
+                addLog("⚠️ Chưa tìm thấy nút [注文を確定する] trên trang.", "warn");
+                return false;
+            }
+
+            placeBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            placeBtn.style.outline = "4px solid #fdcb6e";
+            placeBtn.style.outlineOffset = "3px";
+            placeBtn.style.boxShadow = "0 0 25px rgba(253, 203, 110, 0.9)";
+
+            const autoPlace = localStorage.getItem("pk_auto_place_order") === "1";
+            if (autoPlace || force) {
+                addLog("⚡ Đang chuẩn bị chốt đơn tự động theo cài đặt...", "warn");
+                await new Promise(r => setTimeout(r, gaussianRandom(1500, 300)));
+                simulateMouseApproach(placeBtn);
+                placeBtn.focus();
+                placeBtn.click();
+                if (window.$) try { window.$(placeBtn).trigger('click'); } catch (e) {}
+                addLog("🚀 ĐÃ TỰ ĐỘNG BẤM [注文を確定する] ĐỂ CHỐT ĐƠN HÀNG! Đang chờ website xác nhận...", "success");
+                return true;
+            } else {
+                addLog("✨ ĐÃ TỚI BƯỚC CUỐI CÙNG (stage=placeOrder)!", "success");
+                addLog("👉 Chế độ an toàn đang BẬT: Hãy kiểm tra lại tổng tiền trên web rồi bấm nút [注文を確定する] (hoặc bấm nút màu cam trên Widget) để chốt đơn!", "warn");
+                return true;
+            }
+        }
+
+        if (stage === 'complete') {
+            addLog("🎉🎉 ĐẶT HÀNG THÀNH CÔNG! Đơn hàng đã được xác nhận!", "success");
+            const orderNumEl = document.querySelector('.order-number, .orderNumber, .receipt-number, .order-thank-you-msg');
+            if (orderNumEl) {
+                addLog(`📦 Chi tiết đơn hàng: ${orderNumEl.textContent.trim().replace(/\s+/g, ' ')}`, "success");
+            }
+            return true;
+        }
+
+        addLog(`Chưa nhận diện được nút thao tác cho bước hiện tại (${stage}).`, "info");
+        return false;
+    }
+
+    // 9. Thêm vào giỏ và chuyển thẳng sang đặt hàng từ trang sản phẩm
+    async function addToCartAndCheckout() {
+        const addBtn = findAddToCartButton();
+        if (!addBtn) {
+            addLog("❌ Không tìm thấy nút 'カートに入れる' (Có thể sản phẩm đã hết hàng).", "err");
+            return false;
+        }
+
+        addLog("🛒 Đang di chuột tới nút 'Thêm vào giỏ hàng'...", "info");
+        addBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        addBtn.style.outline = "4px solid #e84393";
+        await new Promise(r => setTimeout(r, gaussianRandom(400, 80)));
+        simulateMouseApproach(addBtn);
+        addBtn.focus();
+        addBtn.click();
+        if (window.$) try { window.$(addBtn).trigger('click'); } catch (e) {}
+
+        addLog("✅ Đã bấm thêm vào giỏ hàng! Đang chuyển hướng tới Giỏ hàng sau 1.5 giây...", "success");
+        setTimeout(() => {
+            window.location.href = "https://www.pokemoncenter-online.com/cart/";
+        }, 1500);
+        return true;
+    }
+
+    // =========================================================================
     // KHỞI TẠO FLOATING WIDGET GIAO DIỆN
     // =========================================================================
 
@@ -1999,6 +2262,9 @@
         const path = window.location.pathname.toLowerCase();
         const isMfaPage = path.includes("mfa") || path.includes("passcode");
         const isLoginPage = (path.includes("login") || path.endsWith("/login/")) && !isMfaPage;
+        const isCartPage = path.includes("/cart") || path.endsWith("/cart/");
+        const isOrderPage = path.includes("/order") || window.location.search.includes("stage=");
+        const isProductPage = path.includes("/product") || window.location.search.includes("p_cd=");
 
         const container = document.createElement("div");
         container.id = "pk-auto-bot-container";
@@ -2107,6 +2373,108 @@
                     <button class="pk-btn-run" id="pk-btn-do-login" style="background: linear-gradient(135deg, #ffa502, #ff7f50);">
                         🔑 TỰ ĐIỀN & BẤM ĐĂNG NHẬP
                     </button>
+                    <div class="pk-logs-header">
+                        <span class="pk-logs-title">📋 KẾT QUẢ & NHẬT KÝ</span>
+                        <div class="pk-logs-actions">
+                            <button type="button" class="pk-logs-btn pk-btn-clear-logs" title="Xóa màn hình kết quả">🗑️ Xóa</button>
+                            <button type="button" class="pk-logs-btn pk-btn-expand-logs" title="Phóng to / Thu nhỏ ô kết quả">⛶ Phóng to</button>
+                        </div>
+                    </div>
+                    <div id="pk-bot-logs"></div>
+                ` : isCartPage ? `
+                    <!-- GIAO DIỆN TRANG GIỎ HÀNG -->
+                    <div class="pk-status-box">
+                        <div style="color: #00cec9; font-weight: bold; margin-bottom: 6px;">🛒 GIỎ HÀNG POKÉMON CENTER</div>
+                        <div class="pk-status-item">
+                            <span>Nick đang chọn:</span>
+                            <span class="pk-status-val info" id="pk-cart-acc-name">--</span>
+                        </div>
+                        <div class="pk-status-item">
+                            <span>Trạng thái:</span>
+                            <span class="pk-status-val success" id="pk-cart-status">Sẵn sàng đặt hàng</span>
+                        </div>
+                    </div>
+
+                    <div class="pk-row" style="padding: 2px 0;">
+                        <span class="pk-switch-label" style="font-size: 11px;">Tự động tiến hành đặt hàng:</span>
+                        <label class="pk-switch">
+                            <input type="checkbox" id="pk-auto-checkout-toggle">
+                            <span class="pk-slider"></span>
+                        </label>
+                    </div>
+
+                    <button class="pk-btn-run" id="pk-btn-do-checkout" style="background: linear-gradient(135deg, #00cec9, #0984e3);">
+                        🛒 TIẾN HÀNH ĐẶT HÀNG (CHECKOUT)
+                    </button>
+
+                    <div class="pk-logs-header">
+                        <span class="pk-logs-title">📋 KẾT QUẢ & NHẬT KÝ</span>
+                        <div class="pk-logs-actions">
+                            <button type="button" class="pk-logs-btn pk-btn-clear-logs" title="Xóa màn hình kết quả">🗑️ Xóa</button>
+                            <button type="button" class="pk-logs-btn pk-btn-expand-logs" title="Phóng to / Thu nhỏ ô kết quả">⛶ Phóng to</button>
+                        </div>
+                    </div>
+                    <div id="pk-bot-logs"></div>
+                ` : isOrderPage ? `
+                    <!-- GIAO DIỆN TRANG ĐẶT HÀNG / CHECKOUT -->
+                    <div class="pk-status-box">
+                        <div style="color: #fdcb6e; font-weight: bold; margin-bottom: 6px;">📦 TIẾN HÀNH ĐẶT HÀNG (CHECKOUT)</div>
+                        <div class="pk-status-item">
+                            <span>Bước hiện tại:</span>
+                            <span class="pk-status-val warn" id="pk-order-current-stage">Đang kiểm tra...</span>
+                        </div>
+                        <div class="pk-status-item">
+                            <span>Nick đang chọn:</span>
+                            <span class="pk-status-val info" id="pk-order-acc-name">--</span>
+                        </div>
+                    </div>
+
+                    <div class="pk-row" style="padding: 2px 0;">
+                        <span class="pk-switch-label" style="font-size: 11px;">Tự động duyệt qua các bước:</span>
+                        <label class="pk-switch">
+                            <input type="checkbox" id="pk-auto-order-steps-toggle" checked>
+                            <span class="pk-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="pk-row" style="padding: 2px 0;">
+                        <span class="pk-switch-label" style="font-size: 11px;">⚡ Tự bấm nút Chốt đơn cuối:</span>
+                        <label class="pk-switch">
+                            <input type="checkbox" id="pk-auto-place-order-toggle">
+                            <span class="pk-slider"></span>
+                        </label>
+                    </div>
+
+                    <button class="pk-btn-run" id="pk-btn-do-order-step" style="background: linear-gradient(135deg, #fdcb6e, #e17055);">
+                        ⚡ BƯỚC TIẾP THEO / CHỐT ĐƠN
+                    </button>
+
+                    <div class="pk-logs-header">
+                        <span class="pk-logs-title">📋 KẾT QUẢ & NHẬT KÝ</span>
+                        <div class="pk-logs-actions">
+                            <button type="button" class="pk-logs-btn pk-btn-clear-logs" title="Xóa màn hình kết quả">🗑️ Xóa</button>
+                            <button type="button" class="pk-logs-btn pk-btn-expand-logs" title="Phóng to / Thu nhỏ ô kết quả">⛶ Phóng to</button>
+                        </div>
+                    </div>
+                    <div id="pk-bot-logs"></div>
+                ` : isProductPage ? `
+                    <!-- GIAO DIỆN TRANG SẢN PHẨM -->
+                    <div class="pk-status-box">
+                        <div style="color: #e84393; font-weight: bold; margin-bottom: 6px;">🛍️ TRANG SẢN PHẨM</div>
+                        <div class="pk-status-item">
+                            <span>Nick đang chọn:</span>
+                            <span class="pk-status-val info" id="pk-prod-acc-name">--</span>
+                        </div>
+                        <div class="pk-status-item">
+                            <span>Thao tác:</span>
+                            <span class="pk-status-val success">Đặt hàng nhanh</span>
+                        </div>
+                    </div>
+
+                    <button class="pk-btn-run" id="pk-btn-quick-buy" style="background: linear-gradient(135deg, #e84393, #d63031);">
+                        ⚡ THÊM VÀO GIỎ & ĐẶT HÀNG NGAY
+                    </button>
+
                     <div class="pk-logs-header">
                         <span class="pk-logs-title">📋 KẾT QUẢ & NHẬT KÝ</span>
                         <div class="pk-logs-actions">
@@ -2382,6 +2750,54 @@
             });
         }
 
+        // Xử lý trang Giỏ hàng (/cart/)
+        const autoCheckoutToggle = document.getElementById("pk-auto-checkout-toggle");
+        if (autoCheckoutToggle) {
+            autoCheckoutToggle.checked = localStorage.getItem("pk_auto_checkout") === "1";
+            autoCheckoutToggle.addEventListener("change", (e) => {
+                localStorage.setItem("pk_auto_checkout", e.target.checked ? "1" : "0");
+                addLog(`Đã ${e.target.checked ? "BẬT" : "TẮT"} tự động tiến hành đặt hàng.`, "info");
+            });
+        }
+        const btnDoCheckout = document.getElementById("pk-btn-do-checkout");
+        if (btnDoCheckout) {
+            btnDoCheckout.addEventListener("click", () => {
+                proceedCartToCheckout();
+            });
+        }
+
+        // Xử lý trang Đặt hàng / Checkout (/order/ hoặc stage=...)
+        const autoOrderStepsToggle = document.getElementById("pk-auto-order-steps-toggle");
+        if (autoOrderStepsToggle) {
+            autoOrderStepsToggle.checked = localStorage.getItem("pk_auto_order_steps") !== "0";
+            autoOrderStepsToggle.addEventListener("change", (e) => {
+                localStorage.setItem("pk_auto_order_steps", e.target.checked ? "1" : "0");
+                addLog(`Đã ${e.target.checked ? "BẬT" : "TẮT"} tự động duyệt các bước đặt hàng.`, "info");
+            });
+        }
+        const autoPlaceOrderToggle = document.getElementById("pk-auto-place-order-toggle");
+        if (autoPlaceOrderToggle) {
+            autoPlaceOrderToggle.checked = localStorage.getItem("pk_auto_place_order") === "1";
+            autoPlaceOrderToggle.addEventListener("change", (e) => {
+                localStorage.setItem("pk_auto_place_order", e.target.checked ? "1" : "0");
+                addLog(`Đã ${e.target.checked ? "BẬT" : "TẮT"} tự động chốt đơn cuối cùng (注文を確定する).`, e.target.checked ? "warn" : "info");
+            });
+        }
+        const btnDoOrderStep = document.getElementById("pk-btn-do-order-step");
+        if (btnDoOrderStep) {
+            btnDoOrderStep.addEventListener("click", () => {
+                processOrderStep(true);
+            });
+        }
+
+        // Xử lý trang Sản phẩm (/product/ hoặc p_cd=)
+        const btnQuickBuy = document.getElementById("pk-btn-quick-buy");
+        if (btnQuickBuy) {
+            btnQuickBuy.addEventListener("click", () => {
+                addToCartAndCheckout();
+            });
+        }
+
         // Xử lý trang xổ số
         const autoToggle = document.getElementById("pk-auto-toggle");
         if (autoToggle) {
@@ -2473,6 +2889,11 @@
         if (path.includes("login") && !path.includes("mfa")) {
             const activeAcc = getActiveAccount();
             const shouldAutoLogin = localStorage.getItem("pk_auto_login") === "1";
+            const hasRurl = window.location.search.includes('rurl=') || window.location.search.includes('redirect=');
+
+            if (hasRurl) {
+                addLog("🔄 Phát hiện đăng nhập từ trang Đặt hàng (Checkout). Sau khi đăng nhập website sẽ tự động quay lại đơn hàng.", "info");
+            }
 
             // Tự động kiểm tra và chấm điểm Profile sau 1.2 giây
             setTimeout(async () => {
@@ -2482,17 +2903,17 @@
             }, 1200);
 
             if (shouldAutoLogin && activeAcc) {
-                // Đợi 4 giây cho F5 WAF telemetry scripts khởi tạo xong
-                addLog("⏳ Đợi 4 giây cho trang tải hoàn tất trước khi tự động đăng nhập...", "info");
+                // Đợi 3.5 giây cho F5 WAF & Gigya telemetry scripts khởi tạo xong
+                addLog("⏳ Đợi 3.5 giây cho trang tải hoàn tất trước khi tự động đăng nhập...", "info");
                 setTimeout(async () => {
                     const filled = await fillLoginForm(activeAcc);
                     if (filled) {
                         await new Promise(r => setTimeout(r, gaussianRandom(600, 150)));
                         await submitLoginForm();
                     }
-                }, 4000);
+                }, 3500);
             } else if (activeAcc) {
-                addLog("Đã tải tài khoản. Bấm nút '🔑 TỰ ĐIỀN' khi bạn sẵn sàng.", "info");
+                addLog("Đã tải tài khoản. Bấm nút '🔑 TỰ ĐIỀN & BẤM ĐĂNG NHẬP' khi bạn sẵn sàng.", "info");
             }
         }
         // 2. Nếu đang ở trang nhập mã OTP
@@ -2503,7 +2924,48 @@
                 fetchOtpFromLocalServer(0, false);
             }, 3000);
         }
-        // 3. Nếu đang ở trang nộp đơn xổ số
+        // 3. Nếu đang ở trang Giỏ hàng (/cart/)
+        else if (path.includes("/cart") || path.endsWith("/cart/")) {
+            const shouldAutoCheckout = localStorage.getItem("pk_auto_checkout") === "1";
+            if (shouldAutoCheckout) {
+                addLog("⚡ Tự động đặt hàng đang BẬT. Sẽ tiến hành sang bước Checkout sau 2 giây...", "info");
+                setTimeout(() => {
+                    proceedCartToCheckout();
+                }, 2000);
+            } else {
+                addLog("🛒 Đang ở trang Giỏ hàng. Bấm nút '🛒 TIẾN HÀNH ĐẶT HÀNG' khi sẵn sàng.", "info");
+            }
+        }
+        // 4. Nếu đang ở trang Đặt hàng / Checkout (/order/ hoặc stage=...)
+        else if (path.includes("/order") || window.location.search.includes("stage=")) {
+            const stage = detectOrderStage();
+            const stageLabels = {
+                'shipping': '🚚 Bước 1: Địa chỉ giao hàng',
+                'payment': '💳 Bước 2: Phương thức thanh toán',
+                'placeOrder': '📦 Bước 3: Xác nhận & Chốt đơn',
+                'complete': '🎉 Bước 4: Đặt hàng thành công',
+                'unknown': 'Đang kiểm tra'
+            };
+            const stageEl = document.getElementById("pk-order-current-stage");
+            if (stageEl) stageEl.textContent = stageLabels[stage] || stage;
+
+            const shouldAutoSteps = localStorage.getItem("pk_auto_order_steps") !== "0"; // Mặc định bật
+            if (stage === 'complete') {
+                processOrderStep();
+            } else if (shouldAutoSteps) {
+                addLog(`⚡ Tự động xử lý [${stageLabels[stage] || stage}] sau 2 giây...`, "info");
+                setTimeout(() => {
+                    processOrderStep();
+                }, 2000);
+            } else {
+                addLog(`Đang ở ${stageLabels[stage] || stage}. Bấm nút trên bảng bot để tiếp tục.`, "info");
+            }
+        }
+        // 5. Nếu đang ở trang chi tiết sản phẩm (/product/ hoặc p_cd=)
+        else if (path.includes("/product") || window.location.search.includes("p_cd=")) {
+            addLog("🛍️ Đang ở trang sản phẩm. Bấm 'THÊM VÀO GIỎ & ĐẶT HÀNG NGAY' để checkout nhanh.", "info");
+        }
+        // 6. Nếu đang ở trang nộp đơn xổ số
         else if (path.includes("lottery/apply.html")) {
             // Tải và hiển thị danh sách sản phẩm có checkbox để chọn ngay khi mở trang
             loadAndRenderProducts();
