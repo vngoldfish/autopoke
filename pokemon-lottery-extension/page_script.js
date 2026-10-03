@@ -2037,6 +2037,90 @@
     // HỆ THỐNG TỰ ĐỘNG ĐẶT HÀNG & THANH TOÁN (AUTO CHECKOUT & ORDER ENGINE)
     // =========================================================================
 
+    // 0. Nhận diện lỗi xung đột giỏ hàng: Giỏ đã có sẵn sản phẩm không thể gộp đơn
+    function detectCartConflictError() {
+        const keywords = [
+            '同時に注文できない商品がカートに投入されています',
+            'カートの商品を空にしてから',
+            '同時に注文できない',
+            'カートの商品を空にしてから、改めて注文してください'
+        ];
+
+        // 1. Kiểm tra trong các khối thông báo lỗi chuẩn Demandware / Pokemon Center
+        const errorBoxes = Array.from(document.querySelectorAll('.cart-error, .comErrorBox, .comBox, .valid-cart-error, .add-to-cart-messages, .alert-danger, .error-message, .error, .c-error, .system-error, [role="alert"]'));
+        for (const box of errorBoxes) {
+            if (box.closest('#pk-auto-bot-container')) continue;
+            const txt = (box.textContent || '').trim();
+            for (const kw of keywords) {
+                if (txt.includes(kw)) {
+                    return { detected: true, message: txt, element: box };
+                }
+            }
+        }
+
+        // 2. Kiểm tra toàn bộ text trên trang (loại trừ container của bot)
+        const bodyText = document.body ? (document.body.innerText || '') : '';
+        for (const kw of keywords) {
+            if (bodyText.includes(kw)) {
+                return { detected: true, message: kw, element: null };
+            }
+        }
+
+        return { detected: false, message: '', element: null };
+    }
+
+    // 0.1 Xóa sạch toàn bộ sản phẩm trong giỏ hàng (/cart/)
+    async function emptyAllCartItems() {
+        addLog("🗑️ Bắt đầu quét các sản phẩm trong giỏ hàng để xóa sạch...", "warn");
+        
+        // Tự động đồng ý popup xác nhận nếu có
+        const originalConfirm = window.confirm;
+        window.confirm = () => true;
+
+        try {
+            // Tìm các nút xóa sản phẩm trong giỏ hàng
+            const deleteButtons = Array.from(document.querySelectorAll('button, a, input[type="button"], input[type="submit"], span, div[role="button"]')).filter(el => {
+                if (el.closest('#pk-auto-bot-container') || el.closest('header') || el.closest('#header')) return false;
+                const txt = (el.textContent || el.value || el.getAttribute('aria-label') || '').trim();
+                const cls = (el.className || '').toString();
+                return txt.includes('削除') || txt.includes('削除する') || txt.includes('カートから削除') ||
+                       cls.includes('delete-product') || cls.includes('cart-delete') || cls.includes('remove-btn') ||
+                       cls.includes('cart-delete-confirmation-btn') || el.getAttribute('data-action') === 'delete';
+            });
+
+            if (deleteButtons.length === 0) {
+                addLog("ℹ️ Không tìm thấy nút xóa nào hoặc giỏ hàng hiện đã trống!", "info");
+                return true;
+            }
+
+            addLog(`🗑️ Tìm thấy ${deleteButtons.length} mục/nút xóa. Đang tiến hành xóa từng món...`, "info");
+            for (let i = 0; i < deleteButtons.length; i++) {
+                const btn = deleteButtons[i];
+                if (!document.body.contains(btn)) continue;
+                btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                btn.click();
+                if (window.$) try { window.$(btn).trigger('click'); } catch (e) {}
+
+                await new Promise(r => setTimeout(r, 600));
+
+                // Nếu xuất hiện modal hỏi xác nhận xóa (Demandware cart-delete-confirmation-btn)
+                const modalConfirm = document.querySelector('.cart-delete-confirmation-btn, button.delete-confirm-btn, .modal.show button.btn-primary');
+                if (modalConfirm) {
+                    modalConfirm.click();
+                    await new Promise(r => setTimeout(r, 800));
+                }
+            }
+
+            addLog("✅ Đã gửi lệnh xóa toàn bộ sản phẩm trong giỏ hàng! Đang tải lại...", "success");
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+            return true;
+        } finally {
+            window.confirm = originalConfirm;
+        }
+    }
+
     // 1. Tìm nút Tiến hành đặt hàng trong trang Giỏ hàng (/cart/)
     function findCartCheckoutButton() {
         const candidates = Array.from(document.querySelectorAll('a, button, input[type="submit"], input[type="button"], div[role="button"]')).filter(b => {
@@ -2309,8 +2393,26 @@
 
     // 9. Bấm nút Đặt trước (予約する) hoặc Thêm vào giỏ (カートに入れる) và sang Giỏ hàng (/cart/)
     async function addToCartAndCheckout() {
+        // Kiểm tra xem trang có đang báo lỗi xung đột giỏ hàng không
+        const conflictBefore = detectCartConflictError();
+        if (conflictBefore.detected) {
+            addLog("⚠️ Phát hiện: Trong giỏ hàng đã có sẵn sản phẩm không thể gộp đơn!", "warn");
+            addLog("👉 Lỗi: '同時に注文できない商品がカートに投入されています。カートの商品を空にしてから、改めて注文してください。'", "warn");
+            addLog("🛒 Bot tự động chuyển ngay sang Giỏ hàng (https://www.pokemoncenter-online.com/cart/) để thanh toán sản phẩm này trước...", "success");
+            setTimeout(() => {
+                window.location.href = "https://www.pokemoncenter-online.com/cart/";
+            }, 1000);
+            return true;
+        }
+
         const addBtn = findAddToCartButton();
         if (!addBtn) {
+            const conflictAfterNoBtn = detectCartConflictError();
+            if (conflictAfterNoBtn.detected) {
+                addLog("⚠️ Sản phẩm đã có trong giỏ hàng! Đang chuyển tới /cart/ để thanh toán...", "warn");
+                window.location.href = "https://www.pokemoncenter-online.com/cart/";
+                return true;
+            }
             addLog("❌ Không tìm thấy nút '予約する' hoặc 'カートに入れる' (Có thể đã hết hạn hoặc hết hàng).", "err");
             return false;
         }
@@ -2325,10 +2427,36 @@
         addBtn.click();
         if (window.$) try { window.$(addBtn).trigger('click'); } catch (e) {}
 
-        addLog(`✅ Đã bấm [${btnTxt}]! Đang chuyển hướng tới Giỏ hàng (/cart/)...`, "success");
+        addLog(`✅ Đã bấm [${btnTxt}]! Đang kiểm tra phản hồi từ Pokémon Center...`, "info");
+
+        // Liên tục kiểm tra xem có phát sinh lỗi xung đột giỏ hàng sau khi bấm không
+        let redirectedToCart = false;
+        const checkConflictTimer = setInterval(() => {
+            if (redirectedToCart) return;
+            const conflict = detectCartConflictError();
+            if (conflict.detected) {
+                redirectedToCart = true;
+                clearInterval(checkConflictTimer);
+                addLog("⚠️ Website thông báo: Giỏ hàng đã có sản phẩm ('同時に注文できない商品がカートに投入されています')!", "warn");
+                addLog("🛒 Bot lập tức chuyển sang trang Giỏ hàng (/cart/) để thanh toán sản phẩm đang chờ trước...", "warn");
+                setTimeout(() => {
+                    window.location.href = "https://www.pokemoncenter-online.com/cart/";
+                }, 800);
+            }
+        }, 350);
 
         // Sau 2.2 giây nếu chưa chuyển sang giỏ hàng thì chủ động hỗ trợ chuyển tiếp
         setTimeout(() => {
+            clearInterval(checkConflictTimer);
+            if (redirectedToCart) return;
+
+            const finalConflict = detectCartConflictError();
+            if (finalConflict.detected) {
+                addLog("⚠️ Trong giỏ hàng đã có sẵn sản phẩm. Đang chuyển tới /cart/...", "warn");
+                window.location.href = "https://www.pokemoncenter-online.com/cart/";
+                return;
+            }
+
             const modalCartBtn = Array.from(document.querySelectorAll('a, button')).find(b => {
                 if (b.closest('#pk-auto-bot-container')) return false;
                 const txt = (b.textContent || '').trim();
@@ -2715,9 +2843,19 @@
                         </label>
                     </div>
 
-                    <button class="pk-btn-run" id="pk-btn-do-checkout" style="background: linear-gradient(135deg, #00cec9, #0984e3);">
-                        🛒 TIẾN HÀNH ĐẶT HÀNG (CHECKOUT)
-                    </button>
+                    <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
+                        <button class="pk-btn-run" id="pk-btn-do-checkout" style="background: linear-gradient(135deg, #00cec9, #0984e3);">
+                            🛒 TIẾN HÀNH ĐẶT HÀNG (レジに進む)
+                        </button>
+                        <div style="display: flex; gap: 6px;">
+                            <button type="button" id="pk-btn-empty-cart" class="pk-btn-audit" style="flex: 1; background: #eb4d4b; font-weight: bold;" title="Xóa sạch toàn bộ sản phẩm đang có trong giỏ hàng">
+                                🗑️ Xóa sạch giỏ hàng
+                            </button>
+                            <button type="button" id="pk-btn-cart-back-history" class="pk-btn-audit" style="flex: 1; background: #3e4451;">
+                                📂 /lottery-history/
+                            </button>
+                        </div>
+                    </div>
 
                     <div class="pk-logs-header">
                         <span class="pk-logs-title">📋 KẾT QUẢ & NHẬT KÝ</span>
@@ -2781,11 +2919,23 @@
                             <span>Thao tác:</span>
                             <span class="pk-status-val success">Đặt hàng nhanh</span>
                         </div>
+                        <div class="pk-status-item" id="pk-prod-conflict-alert" style="display: none;">
+                            <span>Trạng thái giỏ:</span>
+                            <span class="pk-status-val err">Đã có SP trong giỏ!</span>
+                        </div>
                     </div>
 
-                    <button class="pk-btn-run" id="pk-btn-quick-buy" style="background: linear-gradient(135deg, #e84393, #d63031);">
-                        ⚡ THÊM VÀO GIỎ & ĐẶT HÀNG NGAY
-                    </button>
+                    <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
+                        <button class="pk-btn-run" id="pk-btn-quick-buy" style="background: linear-gradient(135deg, #e84393, #d63031);">
+                            ⚡ BẤM [予約する] & VÀO GIỎ HÀNG
+                        </button>
+                        <button class="pk-btn-run" id="pk-btn-goto-cart" style="background: linear-gradient(135deg, #00cec9, #0984e3);">
+                            🛒 VÀO GIỎ HÀNG THANH TOÁN NGAY (/cart/)
+                        </button>
+                        <button type="button" id="pk-btn-prod-back-history" class="pk-btn-audit" style="background: #3e4451;">
+                            📂 Quay lại /lottery-history/
+                        </button>
+                    </div>
 
                     <div class="pk-logs-header">
                         <span class="pk-logs-title">📋 KẾT QUẢ & NHẬT KÝ</span>
@@ -3137,6 +3287,20 @@
                 proceedCartToCheckout();
             });
         }
+        const btnEmptyCart = document.getElementById("pk-btn-empty-cart");
+        if (btnEmptyCart) {
+            btnEmptyCart.addEventListener("click", () => {
+                if (confirm("Bạn có chắc chắn muốn XÓA SẠCH toàn bộ sản phẩm đang có trong giỏ hàng không?")) {
+                    emptyAllCartItems();
+                }
+            });
+        }
+        const btnCartBackHistory = document.getElementById("pk-btn-cart-back-history");
+        if (btnCartBackHistory) {
+            btnCartBackHistory.addEventListener("click", () => {
+                window.location.href = "https://www.pokemoncenter-online.com/lottery-history/";
+            });
+        }
 
         // Xử lý trang Đặt hàng / Checkout (/order/ hoặc stage=...)
         const autoOrderStepsToggle = document.getElementById("pk-auto-order-steps-toggle");
@@ -3167,6 +3331,18 @@
         if (btnQuickBuy) {
             btnQuickBuy.addEventListener("click", () => {
                 addToCartAndCheckout();
+            });
+        }
+        const btnGotoCart = document.getElementById("pk-btn-goto-cart");
+        if (btnGotoCart) {
+            btnGotoCart.addEventListener("click", () => {
+                window.location.href = "https://www.pokemoncenter-online.com/cart/";
+            });
+        }
+        const btnProdBackHistory = document.getElementById("pk-btn-prod-back-history");
+        if (btnProdBackHistory) {
+            btnProdBackHistory.addEventListener("click", () => {
+                window.location.href = "https://www.pokemoncenter-online.com/lottery-history/";
             });
         }
 
@@ -3341,14 +3517,25 @@
         }
         // 3. Nếu đang ở trang Giỏ hàng (/cart/)
         else if (path.includes("/cart") || path.endsWith("/cart/")) {
+            const queueStr = localStorage.getItem("pk_winning_queue");
+            const queueActive = localStorage.getItem("pk_auto_buy_queue_active") === "1";
+            if (queueActive && queueStr) {
+                try {
+                    const queue = JSON.parse(queueStr);
+                    if (queue.length > 0) {
+                        addLog(`⚡ HÀNG ĐỢI TỰ ĐỘNG MUA: Đang ở giỏ hàng để mua món [${queue[0]?.title || 'Sản phẩm trúng'}]! (Còn ${queue.length} món)`, "warn");
+                    }
+                } catch(e) {}
+            }
+
             const shouldAutoCheckout = localStorage.getItem("pk_auto_checkout") === "1";
-            if (shouldAutoCheckout) {
-                addLog("⚡ Tự động đặt hàng đang BẬT. Sẽ tiến hành sang bước Checkout sau 2 giây...", "info");
+            if (shouldAutoCheckout || queueActive) {
+                addLog("⚡ Tự động tiến hành đặt hàng đang BẬT. Sẽ bấm [レジに進む] sau 2 giây...", "info");
                 setTimeout(() => {
                     proceedCartToCheckout();
                 }, 2000);
             } else {
-                addLog("🛒 Đang ở trang Giỏ hàng. Bấm nút '🛒 TIẾN HÀNH ĐẶT HÀNG' khi sẵn sàng.", "info");
+                addLog("🛒 Đang ở trang Giỏ hàng. Bấm nút '🛒 TIẾN HÀNH ĐẶT HÀNG (レジに進む)' khi sẵn sàng.", "info");
             }
         }
         // 4. Nếu đang ở trang Đặt hàng / Checkout (/order/ hoặc stage=...)
@@ -3378,6 +3565,33 @@
         }
         // 5. Nếu đang ở trang chi tiết sản phẩm (/product/ hoặc p_cd= hoặc kết thúc bằng mã số 10-14 chữ số .html)
         else if (path.includes("/product") || window.location.search.includes("p_cd=") || /\/\d{10,14}\.html/.test(path)) {
+            // Kiểm tra ngay xem giỏ hàng đã có sản phẩm xung đột hay chưa
+            const checkInitialConflict = () => {
+                const conflict = detectCartConflictError();
+                if (conflict.detected) {
+                    const conflictAlert = document.getElementById("pk-prod-conflict-alert");
+                    if (conflictAlert) conflictAlert.style.display = "flex";
+
+                    addLog("⚠️ PHÁT HIỆN: Trong giỏ hàng đã có sẵn sản phẩm không thể gộp đơn!", "warn");
+                    addLog("👉 Lỗi: '同時に注文できない商品がカートに投入されています。カートの商品を空にしてから、改めて注文してください。'", "warn");
+                    addLog("🛒 Tự động chuyển ngay sang Giỏ hàng (/cart/) để thanh toán sản phẩm này trước sau 2 giây...", "success");
+                    setTimeout(() => {
+                        window.location.href = "https://www.pokemoncenter-online.com/cart/";
+                    }, 2000);
+                    return true;
+                }
+                return false;
+            };
+
+            if (checkInitialConflict()) {
+                return;
+            }
+
+            // Đợi thêm 800ms để kiểm tra nếu trang load chậm
+            setTimeout(() => {
+                if (checkInitialConflict()) return;
+            }, 800);
+
             const queueStr = localStorage.getItem("pk_winning_queue");
             const queueActive = localStorage.getItem("pk_auto_buy_queue_active") === "1";
             if (queueActive && queueStr) {
@@ -3385,15 +3599,15 @@
                     const queue = JSON.parse(queueStr);
                     const currentItem = queue[0] || {};
                     addLog(`⚡ HÀNG ĐỢI TỰ ĐỘNG MUA ĐANG CHẠY: [${currentItem.title || 'Sản phẩm trúng'}] (Còn ${queue.length} món)`, "warn");
-                    addLog("🛒 Tự động bấm 'カートに入れる' (Thêm vào giỏ) sau 2.5 giây...", "info");
+                    addLog("🛒 Tự động bấm '予約する' (Đặt trước) sau 2.5 giây...", "info");
                     setTimeout(() => {
                         addToCartAndCheckout();
                     }, 2500);
                 } catch(e) {
-                    addLog("🛍️ Đang ở trang sản phẩm. Bấm 'THÊM VÀO GIỎ & ĐẶT HÀNG NGAY' để checkout nhanh.", "info");
+                    addLog("🛍️ Đang ở trang sản phẩm. Bấm 'BẤM [予約する] & VÀO GIỎ HÀNG' để checkout nhanh.", "info");
                 }
             } else {
-                addLog("🛍️ Đang ở trang sản phẩm. Bấm 'THÊM VÀO GIỎ & ĐẶT HÀNG NGAY' để checkout nhanh.", "info");
+                addLog("🛍️ Đang ở trang sản phẩm. Bấm 'BẤM [予約する] & VÀO GIỎ HÀNG' để checkout nhanh.", "info");
             }
         }
         // 6. Nếu đang ở trang Lịch sử xổ số (/lottery-history/) hoặc MyPage (/mypage/)
