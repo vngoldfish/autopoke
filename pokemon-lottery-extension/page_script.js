@@ -2177,170 +2177,169 @@
         return true;
     }
 
-    // 3. Nhận diện giai đoạn đặt hàng hiện tại (/order/)
+    // 3. Nhận diện chính xác giai đoạn đặt hàng hiện tại (/order/)
     function detectOrderStage() {
         const urlParams = new URLSearchParams(window.location.search);
         const stageParam = urlParams.get('stage') || '';
 
-        if (stageParam === 'placeOrder' || document.querySelector('button.place-order, .place-order') || Array.from(document.querySelectorAll('button')).some(b => b.textContent.includes('注文を確定する'))) {
-            return 'placeOrder';
-        }
-        if (stageParam === 'payment' || document.querySelector('button.submit-payment, .submit-payment') || Array.from(document.querySelectorAll('button')).some(b => b.textContent.includes('ご注文内容の確認へ') || b.textContent.includes('確認画面へ'))) {
-            return 'payment';
-        }
-        if (stageParam === 'shipping' || document.querySelector('button.submit-shipping, .submit-shipping') || Array.from(document.querySelectorAll('button')).some(b => b.textContent.includes('お支払い方法の選択へ') || b.textContent.includes('配送先を決定'))) {
-            return 'shipping';
-        }
-        if (document.querySelector('.order-confirmation, .receipt, .order-thank-you-msg') || Array.from(document.querySelectorAll('h1, h2, h3, p')).some(el => el.textContent.includes('ご注文ありがとうございました'))) {
+        // 1. Kiểm tra nếu đã hoàn tất đơn hàng
+        if (stageParam === 'complete' ||
+            document.querySelector('.order-confirmation, .receipt, .order-thank-you-msg') ||
+            Array.from(document.querySelectorAll('h1, h2, h3, p')).some(el => el.textContent.includes('ご注文ありがとうございました'))) {
             return 'complete';
         }
-        return stageParam || 'unknown';
+
+        // 2. Lấy thuộc tính data-checkout-stage từ container Demandware (#checkout-main)
+        const checkoutMain = document.getElementById('checkout-main') || document.querySelector('.data-checkout-stage');
+        const domStage = checkoutMain ? checkoutMain.getAttribute('data-checkout-stage') : '';
+
+        // 3. Ưu tiên URL parameter chính thống của website
+        if (stageParam === 'shipping' || stageParam === 'payment' || stageParam === 'placeOrder') {
+            return stageParam;
+        }
+
+        // 4. Ưu tiên thuộc tính DOM do Demandware checkout.js cập nhật
+        if (domStage === 'shipping' || domStage === 'payment' || domStage === 'placeOrder') {
+            return domStage;
+        }
+
+        // 5. Fallback: Kiểm tra nút bấm đang hiển thị thực tế (Visible)
+        const isVisible = (el) => el && (el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0);
+
+        const placeBtn = Array.from(document.querySelectorAll('a, button')).find(el => {
+            if (el.closest('#pk-auto-bot-container')) return false;
+            const txt = (el.textContent || '').trim().replace(/\s+/g, '');
+            return txt.includes('注文を確定する') && isVisible(el);
+        });
+        if (placeBtn) return 'placeOrder';
+
+        const paymentBtn = Array.from(document.querySelectorAll('a, button')).find(el => {
+            if (el.closest('#pk-auto-bot-container')) return false;
+            const txt = (el.textContent || '').trim().replace(/\s+/g, '');
+            return (txt.includes('ご注文内容を確認する') || txt.includes('確認画面へ')) && isVisible(el);
+        });
+        if (paymentBtn) return 'payment';
+
+        return 'shipping';
     }
 
-    // 4. Tìm nút xác nhận địa chỉ giao hàng (Stage: Shipping)
+    // 4. Tìm nút xác nhận địa chỉ giao hàng (Stage: Shipping) -> "お支払い方法選択へ進む"
     function findShippingNextButton() {
-        return document.querySelector('button.submit-shipping') ||
-               document.querySelector('button[name="submit"][value="shipping"]') ||
-               document.querySelector('.submit-shipping') ||
-               Array.from(document.querySelectorAll('button, a')).find(b => {
-                   if (b.closest('#pk-auto-bot-container')) return false;
-                   const txt = (b.textContent || b.value || '').trim();
-                   return txt.includes('お支払い方法の選択へ') || txt.includes('お支払い方法へ') || txt.includes('配送先を決定') || txt.includes('次へ進む');
-               });
+        // Ưu tiên 1: Thẻ <a class="submit-shipping" href=""> chuẩn Demandware
+        const directBtn = document.querySelector('.next-step-button .submit-shipping') ||
+                          document.querySelector('a.submit-shipping') ||
+                          document.querySelector('.submit-shipping') ||
+                          document.querySelector('button.submit-shipping');
+        if (directBtn) return directBtn;
+
+        // Ưu tiên 2: Quét text loại bỏ khoảng cách
+        return Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]')).find(b => {
+            if (b.closest('#pk-auto-bot-container')) return false;
+            const txt = (b.textContent || b.value || '').trim().replace(/[\s\u3000\u00a0]+/g, '');
+            return txt.includes('お支払い方法選択へ進む') || txt.includes('お支払い方法へ') || txt.includes('配送先を決定') || txt.includes('次へ進む');
+        });
     }
 
-    // 5. Tìm nút xác nhận thanh toán (Stage: Payment)
+    // 5. Tìm nút xác nhận thanh toán (Stage: Payment) -> "ご注文内容を確認する"
     function findPaymentNextButton() {
-        return document.querySelector('button.submit-payment') ||
-               document.querySelector('button[name="submit"][value="payment"]') ||
-               document.querySelector('.submit-payment') ||
-               Array.from(document.querySelectorAll('button, a')).find(b => {
-                   if (b.closest('#pk-auto-bot-container')) return false;
-                   const txt = (b.textContent || b.value || '').trim();
-                   return txt.includes('ご注文内容の確認へ') || txt.includes('注文内容の確認へ') || txt.includes('確認画面へ');
-               });
+        const directBtn = document.querySelector('.next-step-button .submit-payment') ||
+                          document.querySelector('a.submit-payment') ||
+                          document.querySelector('.submit-payment') ||
+                          document.querySelector('button.submit-payment');
+        if (directBtn) return directBtn;
+
+        return Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]')).find(b => {
+            if (b.closest('#pk-auto-bot-container')) return false;
+            const txt = (b.textContent || b.value || '').trim().replace(/[\s\u3000\u00a0]+/g, '');
+            return txt.includes('ご注文内容を確認する') || txt.includes('注文内容を確認') || txt.includes('確認画面へ') || txt.includes('ご注文内容の確認へ');
+        });
     }
 
-    // 6. Tìm nút Chốt đơn cuối cùng (Stage: Place Order)
+    // 6. Tìm nút Chốt đơn cuối cùng (Stage: Place Order) -> "注文を確定する"
     function findPlaceOrderButton() {
-        return document.querySelector('button.place-order') ||
-               document.querySelector('button[name="submit"][value="place-order"]') ||
-               document.querySelector('.place-order') ||
-               document.querySelector('button.placeOrderBtn') ||
-               Array.from(document.querySelectorAll('button')).find(b => {
-                   if (b.closest('#pk-auto-bot-container')) return false;
-                   const txt = (b.textContent || b.value || '').trim();
-                   return txt.includes('注文を確定する') || txt.includes('購入を確定する') || txt.includes('注文完了');
-               });
+        // Nút trên Pokémon Center là thẻ <a>: <li class="list02 next-step-button"><a href="">注文を確定する</a></li>
+        const directLink = Array.from(document.querySelectorAll('.next-step-button a, a, button, input[type="submit"]')).find(b => {
+            if (b.closest('#pk-auto-bot-container')) return false;
+            const txt = (b.textContent || b.value || '').trim().replace(/[\s\u3000\u00a0]+/g, '');
+            return txt === '注文を確定する' || txt.includes('注文を確定する') || txt.includes('購入を確定する');
+        });
+        if (directLink) return directLink;
+
+        return document.querySelector('button.place-order, .place-order, button.placeOrderBtn');
     }
 
-    // 7. Tìm nút Đặt trước (予約する) hoặc Thêm vào giỏ (カートに入れる) trên trang sản phẩm
-    function findAddToCartButton() {
-        // Quét TẤT CẢ các thẻ có thể là nút hoặc chứa chữ (loại trừ container bot, header, footer)
-        const candidates = Array.from(document.querySelectorAll('a, button, input, div, span, p, label')).filter(el => {
-            if (el.closest('#pk-auto-bot-container') || el.closest('header') || el.closest('#header') || el.closest('footer') || el.closest('#footer')) return false;
-            if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'HEAD', 'META'].includes(el.tagName)) return false;
-            return true;
-        });
+    // Tự động theo dõi và tự kích hoạt bước tiếp theo khi chuyển stage (AJAX Demandware)
+    let CHECKOUT_WATCHER_ACTIVE = false;
+    function watchAndAdvanceCheckout() {
+        if (CHECKOUT_WATCHER_ACTIVE) return;
+        CHECKOUT_WATCHER_ACTIVE = true;
 
-        // Hàm chuẩn hóa text: loại bỏ toàn bộ khoảng trắng thường, tab, xuống dòng, dấu cách tiếng Nhật (\u3000) và &nbsp; (\u00a0)
-        const cleanText = (el) => {
-            const raw = (el.textContent || el.value || el.innerText || el.getAttribute('alt') || el.getAttribute('title') || el.getAttribute('aria-label') || '').trim();
-            return raw.replace(/[\s\u3000\u00a0\r\n\t]+/g, '');
+        let lastStage = detectOrderStage();
+
+        // 1. Theo dõi thay đổi data-checkout-stage trên #checkout-main
+        const checkoutMain = document.getElementById('checkout-main') || document.querySelector('.data-checkout-stage');
+        if (checkoutMain) {
+            const observer = new MutationObserver(() => {
+                const currentStage = detectOrderStage();
+                if (currentStage !== lastStage) {
+                    addLog(`🔄 Chuyển bước thanh toán: [${lastStage}] ➜ [${currentStage}]`, "info");
+                    lastStage = currentStage;
+                    updateStageLabels(currentStage);
+
+                    const autoSteps = localStorage.getItem("pk_auto_order_steps") !== "0";
+                    if (autoSteps || currentStage === 'complete') {
+                        setTimeout(() => { processOrderStep(); }, 1800);
+                    }
+                }
+            });
+            observer.observe(checkoutMain, { attributes: true, attributeFilter: ['data-checkout-stage', 'class'] });
+        }
+
+        // 2. Định kỳ kiểm tra (Polling) dự phòng
+        const stageInterval = setInterval(() => {
+            if (!window.location.pathname.includes('/order') && !window.location.search.includes('stage=')) {
+                clearInterval(stageInterval);
+                CHECKOUT_WATCHER_ACTIVE = false;
+                return;
+            }
+
+            const currentStage = detectOrderStage();
+            if (currentStage === 'complete') {
+                clearInterval(stageInterval);
+                CHECKOUT_WATCHER_ACTIVE = false;
+                processOrderStep();
+                return;
+            }
+
+            if (currentStage !== lastStage) {
+                addLog(`🔄 Chuyển bước thanh toán (poll): [${lastStage}] ➜ [${currentStage}]`, "info");
+                lastStage = currentStage;
+                updateStageLabels(currentStage);
+
+                const autoSteps = localStorage.getItem("pk_auto_order_steps") !== "0";
+                if (autoSteps) {
+                    setTimeout(() => { processOrderStep(); }, 1800);
+                }
+            }
+        }, 1500);
+    }
+
+    function updateStageLabels(stage) {
+        const stageLabels = {
+            'shipping': '🚚 Bước 1: Địa chỉ giao hàng',
+            'payment': '💳 Bước 2: Phương thức thanh toán',
+            'placeOrder': '📦 Bước 3: Xác nhận & Chốt đơn',
+            'complete': '🎉 Bước 4: Đặt hàng thành công'
         };
-
-        // 1. ƯU TIÊN SỐ 1: Nút "予約する" (Các sản phẩm trúng bốc thăm luôn có nút Đặt trước)
-        const reserveMatches = candidates.filter(el => {
-            const txt = cleanText(el);
-            return txt === '予約する' || txt.includes('予約する') || txt.includes('予約購入');
-        });
-
-        if (reserveMatches.length > 0) {
-            // Sắp xếp theo độ dài text tăng dần để ưu tiên phần tử cụ thể nhất (leaf node)
-            reserveMatches.sort((a, b) => cleanText(a).length - cleanText(b).length);
-
-            // Tìm phần tử có tính năng click trực tiếp (a, button, input hoặc có class comBtn / btn)
-            const interactiveEl = reserveMatches.find(el => {
-                const tag = el.tagName;
-                const cls = (el.className || '').toString();
-                return tag === 'A' || tag === 'BUTTON' || tag === 'INPUT' ||
-                       el.getAttribute('role') === 'button' ||
-                       el.onclick ||
-                       cls.includes('comBtn') || cls.includes('Btn') || cls.includes('btn');
-            });
-            if (interactiveEl) return interactiveEl;
-
-            // Nếu text nằm trong thẻ con (span, p, div), lấy thẻ cha gần nhất là a hoặc button
-            for (const el of reserveMatches) {
-                const parentClickable = el.closest('a, button, [role="button"], form');
-                if (parentClickable && !parentClickable.closest('#pk-auto-bot-container')) {
-                    return parentClickable;
-                }
-            }
-
-            return reserveMatches[0];
-        }
-
-        // 2. ƯU TIÊN SỐ 2: Nút "カートに入れる" (Thêm vào giỏ thông thường)
-        const cartMatches = candidates.filter(el => {
-            const txt = cleanText(el);
-            return txt === 'カートに入れる' || txt.includes('カートに入れる') || txt.includes('カートへ入れる');
-        });
-
-        if (cartMatches.length > 0) {
-            cartMatches.sort((a, b) => cleanText(a).length - cleanText(b).length);
-            const interactiveEl = cartMatches.find(el => {
-                const tag = el.tagName;
-                const cls = (el.className || '').toString();
-                return tag === 'A' || tag === 'BUTTON' || tag === 'INPUT' ||
-                       el.getAttribute('role') === 'button' ||
-                       el.onclick ||
-                       cls.includes('comBtn') || cls.includes('Btn') || cls.includes('btn');
-            });
-            if (interactiveEl) return interactiveEl;
-
-            for (const el of cartMatches) {
-                const parentClickable = el.closest('a, button, [role="button"], form');
-                if (parentClickable && !parentClickable.closest('#pk-auto-bot-container')) {
-                    return parentClickable;
-                }
-            }
-
-            return cartMatches[0];
-        }
-
-        // 3. Fallback theo selector chuẩn Demandware và Pokémon Center Online
-        const fallbackSelectors = [
-            '.comBtn01',
-            '.comBtn02',
-            'a[class*="comBtn" i]',
-            'div[class*="comBtn" i]',
-            'button.add-to-cart',
-            'button.add-to-cart-global',
-            'button.reserve-btn',
-            '.add-to-cart',
-            '.reserve-btn',
-            '#add-to-cart',
-            'a[href*="Cart-AddProduct"]',
-            'form[action*="Cart-AddProduct"] button',
-            'form[action*="Cart-AddProduct"] input[type="submit"]',
-            'a[class*="reserve" i]',
-            'button[class*="reserve" i]'
-        ];
-
-        for (const sel of fallbackSelectors) {
-            const el = document.querySelector(sel);
-            if (el && !el.closest('#pk-auto-bot-container') && !el.closest('header') && !el.closest('footer')) {
-                return el;
-            }
-        }
-
-        return null;
+        const stageEl = document.getElementById("pk-order-current-stage");
+        if (stageEl) stageEl.textContent = stageLabels[stage] || stage;
     }
 
     // 8. Tự động xử lý từng bước của quá trình đặt hàng (/order/)
     async function processOrderStep(force = false) {
+        watchAndAdvanceCheckout();
         const stage = detectOrderStage();
+        updateStageLabels(stage);
 
         if (stage === 'shipping') {
             addLog("🚚 Đang ở bước: Xác nhận Địa chỉ nhận hàng (stage=shipping)...", "info");
@@ -2350,14 +2349,46 @@
                 return false;
             }
 
+            // Đảm bảo địa chỉ giao hàng đã được chọn (nếu có radio polAddressSelector)
+            const selectedAddress = document.querySelector('input.polAddressSelector:checked');
+            if (!selectedAddress) {
+                const firstAddress = document.querySelector('input.polAddressSelector');
+                if (firstAddress) {
+                    firstAddress.checked = true;
+                    firstAddress.dispatchEvent(new Event('change', { bubbles: true }));
+                    addLog("🏠 Đã tự động tích chọn địa chỉ giao hàng đầu tiên.", "info");
+                }
+            }
+
             nextBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
             nextBtn.style.outline = "4px solid #1e90ff";
+            nextBtn.style.outlineOffset = "3px";
+            nextBtn.style.boxShadow = "0 0 25px rgba(30, 144, 255, 0.8)";
+
             await new Promise(r => setTimeout(r, gaussianRandom(600, 120)));
             simulateMouseApproach(nextBtn);
             nextBtn.focus();
-            nextBtn.click();
+
+            // Kích hoạt toàn diện các sự kiện chuột
+            const events = ['mouseenter', 'mouseover', 'mousedown', 'mouseup', 'click'];
+            events.forEach(evt => {
+                try { nextBtn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window })); } catch (e) {}
+            });
+
+            try { nextBtn.click(); } catch (e) {}
             if (window.$) try { window.$(nextBtn).trigger('click'); } catch (e) {}
-            addLog("✅ Đã xác nhận Địa chỉ! Đang chuyển sang bước Phương thức thanh toán...", "success");
+
+            addLog("✅ Đã bấm [お支払い方法選択へ進む]! Đang chuyển sang bước Phương thức thanh toán...", "success");
+
+            // Đợi 2.5s kiểm tra xem đã chuyển sang payment hay chưa
+            setTimeout(() => {
+                const newStage = detectOrderStage();
+                if (newStage === 'payment') {
+                    addLog("💳 Đã sang bước Phương thức thanh toán. Đang tự động tiếp tục...", "info");
+                    processOrderStep();
+                }
+            }, 2500);
+
             return true;
         }
 
@@ -2371,12 +2402,32 @@
 
             nextBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
             nextBtn.style.outline = "4px solid #1e90ff";
+            nextBtn.style.outlineOffset = "3px";
+            nextBtn.style.boxShadow = "0 0 25px rgba(30, 144, 255, 0.8)";
+
             await new Promise(r => setTimeout(r, gaussianRandom(600, 120)));
             simulateMouseApproach(nextBtn);
             nextBtn.focus();
-            nextBtn.click();
+
+            const events = ['mouseenter', 'mouseover', 'mousedown', 'mouseup', 'click'];
+            events.forEach(evt => {
+                try { nextBtn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window })); } catch (e) {}
+            });
+
+            try { nextBtn.click(); } catch (e) {}
             if (window.$) try { window.$(nextBtn).trigger('click'); } catch (e) {}
+
             addLog("✅ Đã xác nhận Thanh toán! Đang chuyển sang bước Xem lại & Chốt đơn...", "success");
+
+            // Đợi 2.5s kiểm tra xem đã chuyển sang placeOrder hay chưa
+            setTimeout(() => {
+                const newStage = detectOrderStage();
+                if (newStage === 'placeOrder') {
+                    addLog("📦 Đã sang bước Xác nhận & Chốt đơn (placeOrder). Chuẩn bị bước cuối...", "info");
+                    processOrderStep();
+                }
+            }, 2500);
+
             return true;
         }
 
@@ -2413,8 +2464,15 @@
                 await new Promise(r => setTimeout(r, gaussianRandom(1500, 300)));
                 simulateMouseApproach(placeBtn);
                 placeBtn.focus();
-                placeBtn.click();
+
+                const events = ['mouseenter', 'mouseover', 'mousedown', 'mouseup', 'click'];
+                events.forEach(evt => {
+                    try { placeBtn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window })); } catch (e) {}
+                });
+
+                try { placeBtn.click(); } catch (e) {}
                 if (window.$) try { window.$(placeBtn).trigger('click'); } catch (e) {}
+
                 addLog("🚀 ĐÃ TỰ ĐỘNG BẤM [注文を確定する] ĐỂ CHỐT ĐƠN HÀNG! Đang chờ website xác nhận...", "success");
                 return true;
             } else {
@@ -3666,6 +3724,9 @@
             };
             const stageEl = document.getElementById("pk-order-current-stage");
             if (stageEl) stageEl.textContent = stageLabels[stage] || stage;
+
+            // Kích hoạt watcher theo dõi AJAX Demandware chuyển stage
+            watchAndAdvanceCheckout();
 
             const shouldAutoSteps = localStorage.getItem("pk_auto_order_steps") !== "0"; // Mặc định bật
             if (stage === 'complete') {
