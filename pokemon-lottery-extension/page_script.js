@@ -2039,16 +2039,27 @@
 
     // 1. Tìm nút Tiến hành đặt hàng trong trang Giỏ hàng (/cart/)
     function findCartCheckoutButton() {
-        return document.querySelector('.checkout-btn') ||
-               document.querySelector('a.checkout-btn') ||
-               document.querySelector('button.checkout-btn') ||
-               document.querySelector('a[href*="/order/"]') ||
-               document.querySelector('a[href*="stage="]') ||
-               Array.from(document.querySelectorAll('a, button')).find(b => {
-                   if (b.closest('#pk-auto-bot-container') || b.closest('header') || b.closest('#header')) return false;
-                   const txt = (b.textContent || b.value || '').trim();
-                   return txt.includes('ご注文手続きへ') || txt.includes('レジに進む') || txt.includes('購入手続きへ');
-               });
+        const candidates = Array.from(document.querySelectorAll('a, button, input[type="submit"], input[type="button"], div[role="button"]')).filter(b => {
+            if (b.closest('#pk-auto-bot-container') || b.closest('header') || b.closest('#header')) return false;
+            return true;
+        });
+
+        // 1. Ưu tiên hàng đầu: Nút "レジに進む" (Chuẩn trang giỏ hàng Pokémon Center Online)
+        const rejiBtn = candidates.find(b => {
+            const txt = (b.textContent || b.value || '').trim();
+            return txt.includes('レジに進む') || txt.includes('レジへ進む') || txt.includes('レジへ');
+        });
+        if (rejiBtn) return rejiBtn;
+
+        // 2. Tìm nút "ご注文手続きへ" hoặc "購入手続きへ"
+        const orderBtn = candidates.find(b => {
+            const txt = (b.textContent || b.value || '').trim();
+            return txt.includes('ご注文手続きへ') || txt.includes('注文手続きへ') || txt.includes('購入手続きへ');
+        });
+        if (orderBtn) return orderBtn;
+
+        // 3. Fallback theo class / href
+        return document.querySelector('.checkout-btn, a.checkout-btn, button.checkout-btn, a[href*="/order/"], a[href*="stage="]');
     }
 
     // 2. Chuyển từ giỏ hàng sang bước đặt hàng
@@ -2139,17 +2150,29 @@
                });
     }
 
-    // 7. Tìm nút Thêm vào giỏ trên trang sản phẩm
+    // 7. Tìm nút Đặt trước (予約する) hoặc Thêm vào giỏ (カートに入れる) trên trang sản phẩm
     function findAddToCartButton() {
-        return document.querySelector('button.add-to-cart') ||
-               document.querySelector('button.add-to-cart-global') ||
-               document.querySelector('.product-detail .add-to-cart') ||
-               document.querySelector('#add-to-cart') ||
-               Array.from(document.querySelectorAll('button')).find(b => {
-                   if (b.closest('#pk-auto-bot-container')) return false;
-                   const txt = (b.textContent || b.value || '').trim();
-                   return txt.includes('カートに入れる');
-               });
+        const candidates = Array.from(document.querySelectorAll('button, a.btn, a[class*="btn"], input[type="submit"], input[type="button"], div[role="button"]')).filter(b => {
+            if (b.closest('#pk-auto-bot-container') || b.closest('header') || b.closest('#header')) return false;
+            return true;
+        });
+
+        // 1. Ưu tiên nút "予約する" (Các sản phẩm trúng bốc thăm luôn ở dạng Pre-order / Đặt trước)
+        const reserveBtn = candidates.find(b => {
+            const txt = (b.textContent || b.value || '').trim();
+            return txt.includes('予約する') || txt.includes('予約購入');
+        });
+        if (reserveBtn) return reserveBtn;
+
+        // 2. Tìm nút "カートに入れる" (Thêm vào giỏ hàng thông thường)
+        const cartBtn = candidates.find(b => {
+            const txt = (b.textContent || b.value || '').trim();
+            return txt.includes('カートに入れる') || txt.includes('カートへ入れる');
+        });
+        if (cartBtn) return cartBtn;
+
+        // 3. Fallback theo selector chuẩn Demandware
+        return document.querySelector('button.add-to-cart, button.reserve-btn, .add-to-cart, .reserve-btn, #add-to-cart');
     }
 
     // 8. Tự động xử lý từng bước của quá trình đặt hàng (/order/)
@@ -2264,7 +2287,7 @@
                                 if (nextItem.url) {
                                     window.location.href = nextItem.url;
                                 } else {
-                                    window.location.href = "https://www.pokemoncenter-online.com/mypage/";
+                                    window.location.href = "https://www.pokemoncenter-online.com/lottery-history/";
                                 }
                             }, 4000);
                         } else {
@@ -2284,15 +2307,16 @@
         return false;
     }
 
-    // 9. Thêm vào giỏ và chuyển thẳng sang đặt hàng từ trang sản phẩm
+    // 9. Bấm nút Đặt trước (予約する) hoặc Thêm vào giỏ (カートに入れる) và sang Giỏ hàng (/cart/)
     async function addToCartAndCheckout() {
         const addBtn = findAddToCartButton();
         if (!addBtn) {
-            addLog("❌ Không tìm thấy nút 'カートに入れる' (Có thể sản phẩm đã hết hàng).", "err");
+            addLog("❌ Không tìm thấy nút '予約する' hoặc 'カートに入れる' (Có thể đã hết hạn hoặc hết hàng).", "err");
             return false;
         }
 
-        addLog("🛒 Đang di chuột tới nút 'Thêm vào giỏ hàng'...", "info");
+        const btnTxt = (addBtn.textContent || addBtn.value || '予約する').trim();
+        addLog(`🛒 Đang di chuột tới nút [${btnTxt}]...`, "info");
         addBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
         addBtn.style.outline = "4px solid #e84393";
         await new Promise(r => setTimeout(r, gaussianRandom(400, 80)));
@@ -2301,10 +2325,21 @@
         addBtn.click();
         if (window.$) try { window.$(addBtn).trigger('click'); } catch (e) {}
 
-        addLog("✅ Đã bấm thêm vào giỏ hàng! Đang chuyển hướng tới Giỏ hàng sau 1.5 giây...", "success");
+        addLog(`✅ Đã bấm [${btnTxt}]! Đang chuyển hướng tới Giỏ hàng (/cart/)...`, "success");
+
+        // Sau 2.2 giây nếu chưa chuyển sang giỏ hàng thì chủ động hỗ trợ chuyển tiếp
         setTimeout(() => {
-            window.location.href = "https://www.pokemoncenter-online.com/cart/";
-        }, 1500);
+            const modalCartBtn = Array.from(document.querySelectorAll('a, button')).find(b => {
+                if (b.closest('#pk-auto-bot-container')) return false;
+                const txt = (b.textContent || '').trim();
+                return txt.includes('カートを見る') || txt.includes('レジに進む') || txt.includes('カートへ');
+            });
+            if (modalCartBtn) {
+                modalCartBtn.click();
+            } else if (!window.location.pathname.includes('/cart')) {
+                window.location.href = "https://www.pokemoncenter-online.com/cart/";
+            }
+        }, 2200);
         return true;
     }
 
@@ -2312,25 +2347,25 @@
     // QUÉT KẾT QUẢ XỔ SỐ & HÀNG ĐỢI TỰ ĐỘNG MUA TỪNG MÓN (WINNER AUTO-BUY QUEUE)
     // =========================================================================
 
-    // 10. Tìm tất cả các sản phẩm trúng thưởng (当選) trên trang
+    // 10. Tìm các sản phẩm trúng thưởng ĐANG TRONG THỜI HẠN MUA (Có nút "注文へ進む")
     function findWinningItemsOnPage() {
         const winners = [];
 
-        // Tìm tất cả các thẻ văn bản có chữ 当選 (Trúng thưởng)
-        const candidates = Array.from(document.querySelectorAll('span, div, p, strong, b, td, em, h3, h4, a')).filter(el => {
-            if (el.closest('#pk-auto-bot-container')) return false;
-            const txt = (el.textContent || '').trim();
-            if (el.children.length > 2 || txt.length > 30) return false;
-            return (txt === '当選' || txt.startsWith('当選') || txt.includes('【当選】')) &&
-                   !txt.includes('落選') && !txt.includes('当選発表') && !txt.includes('当選者') && !txt.includes('当選の権利');
+        // Tìm tất cả các nút hoặc liên kết có chữ "注文へ進む" hoặc "購入手続きへ"
+        // (Đây là tiêu chuẩn duy nhất xác định sản phẩm trúng thưởng ĐANG ĐƯỢC PHÉP MUA, loại trừ các đợt cũ)
+        const actionBtns = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]')).filter(b => {
+            if (b.closest('#pk-auto-bot-container')) return false;
+            const txt = (b.textContent || b.value || '').trim();
+            return txt.includes('注文へ進む') || txt.includes('購入手続きへ') || txt.includes('予約へ進む');
         });
 
-        candidates.forEach((badgeEl, idx) => {
-            const container = badgeEl.closest('.comBox, .history-item, .lottery-item, .card, tr, li, .item, .c-box, div[class*="lottery"], div[class*="item"]') ||
-                              badgeEl.parentElement?.parentElement || badgeEl.parentElement;
+        actionBtns.forEach((orderBtn, idx) => {
+            const container = orderBtn.closest('.comBox, .history-item, .lottery-item, .card, tr, li, .item, .c-box, div[class*="lottery"], div[class*="item"]') ||
+                              orderBtn.parentElement?.parentElement || orderBtn.parentElement;
             if (!container) return;
 
-            if (winners.some(w => w.container === container)) return;
+            // Tránh trùng lặp
+            if (winners.some(w => w.orderBtn === orderBtn || (w.container === container && w.orderBtn))) return;
 
             // Tìm tên sản phẩm
             let title = '';
@@ -2338,29 +2373,22 @@
             if (titleEl) {
                 title = titleEl.textContent.trim().replace(/\s+/g, ' ');
             } else {
-                title = container.textContent.trim().slice(0, 60);
+                const lines = container.textContent.split('\n').map(s => s.trim()).filter(s => s.length > 5 && !s.includes('注文へ進む') && !s.includes('当選'));
+                title = lines[0] || `Sản phẩm trúng #${idx + 1}`;
             }
 
-            // Tìm nút đặt hàng (注文へ進む, 購入手続きへ, ...)
-            const actionEls = Array.from(container.querySelectorAll('a, button, input[type="button"], input[type="submit"]'));
-            const orderBtn = actionEls.find(b => {
-                const bTxt = (b.textContent || b.value || '').trim();
-                return bTxt.includes('注文へ進む') || bTxt.includes('購入手続き') || bTxt.includes('注文する') || bTxt.includes('購入する') || bTxt.includes('購入へ');
-            });
-
+            // Lấy URL đặt hàng trực tiếp từ nút hoặc liên kết
             let orderUrl = '';
-            if (orderBtn) {
-                if (orderBtn.tagName === 'A' && orderBtn.href && !orderBtn.href.startsWith('javascript:')) {
-                    orderUrl = orderBtn.href;
-                } else if (orderBtn.getAttribute('data-href') || orderBtn.getAttribute('data-url')) {
-                    orderUrl = orderBtn.getAttribute('data-href') || orderBtn.getAttribute('data-url');
-                } else if (orderBtn.getAttribute('onclick')) {
-                    const m = orderBtn.getAttribute('onclick').match(/['"](https?:\/\/[^'"]+|\/[^'"]+)['"]/);
-                    if (m) orderUrl = m[1];
-                }
+            if (orderBtn.tagName === 'A' && orderBtn.href && !orderBtn.href.startsWith('javascript:')) {
+                orderUrl = orderBtn.href;
+            } else if (orderBtn.getAttribute('data-href') || orderBtn.getAttribute('data-url')) {
+                orderUrl = orderBtn.getAttribute('data-href') || orderBtn.getAttribute('data-url');
+            } else if (orderBtn.getAttribute('onclick')) {
+                const m = orderBtn.getAttribute('onclick').match(/['"](https?:\/\/[^'"]+|\/[^'"]+)['"]/);
+                if (m) orderUrl = m[1];
             }
 
-            // Nếu nút không có URL trực tiếp, tìm link sản phẩm trong thẻ card
+            // Nếu nút là JS click nội bộ, tìm thẻ link sản phẩm trong thẻ card
             if (!orderUrl) {
                 const productLink = container.querySelector('a[href*="/product/"], a[href*="p_cd="], a[href*=".html"]');
                 if (productLink && productLink.href && !productLink.href.includes('mypage') && !productLink.href.includes('guide')) {
@@ -2378,7 +2406,7 @@
 
             winners.push({
                 id: idx + 1,
-                title: title || `Sản phẩm trúng #${idx + 1}`,
+                title: title,
                 orderUrl: orderUrl,
                 orderBtn: orderBtn,
                 deadline: deadline,
@@ -2389,11 +2417,31 @@
         return winners;
     }
 
-    // 11. Quét kết quả xổ số (Toàn bộ trang MyPage / Lịch sử)
+    // 11. Quét kết quả xổ số (Xử lý trang /lottery-history/)
     function scanLotteryResults(autoStartBuy = false) {
-        addLog("🔍 Đang quét kết quả bốc thăm trên trang...", "info");
+        const path = window.location.pathname.toLowerCase();
 
-        const winners = findWinningItemsOnPage();
+        // Nếu người dùng đang ở /mypage/ mà chưa vào /lottery-history/
+        if (!path.includes('lottery-history')) {
+            addLog("⚠️ Kết quả bốc thăm nằm ở trang: /lottery-history/", "warn");
+            addLog("🚀 Đang tự động chuyển hướng tới: https://www.pokemoncenter-online.com/lottery-history/ sau 1.5 giây...", "info");
+            setTimeout(() => {
+                window.location.href = "https://www.pokemoncenter-online.com/lottery-history/";
+            }, 1500);
+            return [];
+        }
+
+        addLog("🔍 Đang quét các sản phẩm trúng thưởng được phép mua (có nút [注文へ進む])...", "info");
+
+        // Tìm các sản phẩm CÓ NÚT "注文へ進む"
+        const activeWinners = findWinningItemsOnPage();
+
+        // Đếm tổng số huy hiệu 当選 trên trang (bao gồm cả đợt cũ)
+        const totalWinBadges = Array.from(document.querySelectorAll('*')).filter(el => {
+            if (el.closest('#pk-auto-bot-container')) return false;
+            const txt = (el.textContent || '').trim();
+            return (txt === '当選' || txt.startsWith('当選') || txt.includes('【当選】')) && el.children.length === 0;
+        }).length;
 
         // Đếm các mục 落選 (Không trúng)
         const lostCount = Array.from(document.querySelectorAll('*')).filter(el => {
@@ -2402,42 +2450,42 @@
             return (txt === '落選' || txt.includes('【落選】')) && el.children.length === 0;
         }).length;
 
-        // Đếm các mục 受付完了 / 抽選中 (Đang chờ)
-        const pendingCount = Array.from(document.querySelectorAll('*')).filter(el => {
-            if (el.closest('#pk-auto-bot-container')) return false;
-            const txt = (el.textContent || '').trim();
-            return (txt === '受付完了' || txt === '抽選中') && el.children.length === 0;
-        }).length;
+        if (activeWinners.length > 0) {
+            addLog(`🎉🎉 PHÁT HIỆN ${activeWinners.length} SẢN PHẨM TRÚNG ĐANG TRONG HẠN MUA (Có nút [注文へ進む])!`, "success");
+            
+            const pastCount = totalWinBadges - activeWinners.length;
+            if (pastCount > 0) {
+                addLog(`📋 (Đã tự động loại trừ ${pastCount} kết quả trúng đợt trước do đã mua hoặc hết hạn).`, "info");
+            }
 
-        if (winners.length > 0) {
-            addLog(`🎉🎉 PHÁT HIỆN TỔNG CỘNG ${winners.length} SẢN PHẨM TRÚNG THƯỞNG (当選)!`, "success");
-            winners.forEach((w, i) => {
+            activeWinners.forEach((w, i) => {
                 const deadlineTxt = w.deadline ? ` (Hạn chót: ${w.deadline})` : '';
                 addLog(`🏆 ${i + 1}. ${w.title}${deadlineTxt}`, "success");
                 if (w.orderBtn) {
-                    w.orderBtn.style.outline = "3px solid #2ed573";
-                    w.orderBtn.style.boxShadow = "0 0 15px rgba(46, 213, 115, 0.8)";
+                    w.orderBtn.style.outline = "4px solid #2ed573";
+                    w.orderBtn.style.boxShadow = "0 0 20px rgba(46, 213, 115, 0.9)";
                 }
             });
 
             // Cập nhật lên UI
             const winnerCountEl = document.getElementById("pk-mypage-win-count");
-            if (winnerCountEl) winnerCountEl.textContent = `${winners.length} (Trúng!)`;
+            if (winnerCountEl) winnerCountEl.textContent = `${activeWinners.length} món (Được phép mua)`;
 
             if (autoStartBuy) {
-                addLog("⚡ Chế độ tự động mua đang BẬT. Bắt đầu quy trình mua lần lượt từng món...", "warn");
-                startSequentialAutoBuy(winners);
+                addLog("⚡ Chế độ tự động mua đang BẬT. Bắt đầu quy trình mua tuần tự từng món...", "warn");
+                startSequentialAutoBuy(activeWinners);
             } else {
-                addLog("💡 Bấm nút '⚡ BẮT ĐẦU TỰ ĐỘNG MUA LẦN LƯỢT TỪNG MÓN' để bot gom đơn đặt mua.", "info");
+                addLog("💡 Bấm nút '⚡ BẮT ĐẦU TỰ ĐỘNG MUA LẦN LƯỢT TỪNG MÓN' để bot tự đặt mua.", "info");
             }
         } else {
-            addLog(`📋 Kết quả quét: 0 Trúng | ${lostCount} Không trúng (落選) | ${pendingCount} Đang chờ (受付完了)`, "info");
-            if (lostCount === 0 && pendingCount === 0) {
-                addLog("💡 Nếu bạn chưa ở mục '抽選申込み履歴' (Lịch sử bốc thăm), hãy bấm nút [📂 Đến mục Lịch sử xổ số] rồi quét lại.", "warn");
+            if (totalWinBadges > 0) {
+                addLog(`📋 Tìm thấy ${totalWinBadges} mục '当選', nhưng tất cả đều KHÔNG có nút [注文へ進む] (Đã hết hạn thanh toán hoặc đã mua đợt trước).`, "warn");
+            } else {
+                addLog(`📋 Không tìm thấy sản phẩm trúng thưởng nào có nút [注文へ進む]. (${lostCount} đơn 落選)`, "info");
             }
         }
 
-        return winners;
+        return activeWinners;
     }
 
     // 12. Bắt đầu Hàng đợi tự động mua lần lượt từng món
@@ -2447,7 +2495,7 @@
         }
 
         if (!winningItems || winningItems.length === 0) {
-            addLog("❌ Không tìm thấy sản phẩm trúng thưởng nào để mua!", "err");
+            addLog("❌ Không tìm thấy sản phẩm trúng thưởng nào có nút '注文へ進む' để mua!", "err");
             return false;
         }
 
@@ -2509,30 +2557,10 @@
         }
     }
 
-    // 14. Tìm và bấm chuyển tới mục 抽選申込み履歴 trong MyPage
+    // 14. Chuyển tới trang Lịch sử xổ số (/lottery-history/)
     function goToLotteryHistoryPage() {
-        const links = Array.from(document.querySelectorAll('a'));
-        const historyLink = links.find(a => {
-            if (a.closest('#pk-auto-bot-container')) return false;
-            const txt = (a.textContent || '').trim();
-            return txt.includes('抽選申込み履歴') || txt.includes('抽選履歴') || txt.includes('抽選結果');
-        });
-
-        if (historyLink) {
-            addLog(`📂 Đã tìm thấy liên kết [${historyLink.textContent.trim()}], đang chuyển hướng...`, "info");
-            historyLink.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            historyLink.style.outline = "3px solid #00cec9";
-            setTimeout(() => {
-                historyLink.click();
-                if (historyLink.href && !historyLink.href.startsWith('javascript:')) {
-                    window.location.href = historyLink.href;
-                }
-            }, 600);
-            return true;
-        } else {
-            addLog("⚠️ Không tìm thấy liên kết '抽選申込み履歴' trên màn hình hiện tại. Bạn vui lòng bấm vào menu '抽選申込み履歴' trong MyPage.", "warn");
-            return false;
-        }
+        addLog("🚀 Đang chuyển hướng tới trang Lịch sử xổ số: https://www.pokemoncenter-online.com/lottery-history/...", "info");
+        window.location.href = "https://www.pokemoncenter-online.com/lottery-history/";
     }
 
     // =========================================================================
@@ -2810,7 +2838,7 @@
                         </button>
                         <div style="display: flex; gap: 6px;">
                             <button type="button" id="pk-btn-goto-history" class="pk-btn-audit" style="flex: 1; background: #3e4451;">
-                                📂 Đến mục "抽選申込み履歴"
+                                📂 Đến trang /lottery-history/
                             </button>
                             <button type="button" id="pk-btn-stop-queue" class="pk-btn-audit" style="flex: 0.6; background: #eb4d4b;">
                                 🛑 Dừng mua
@@ -3368,27 +3396,47 @@
                 addLog("🛍️ Đang ở trang sản phẩm. Bấm 'THÊM VÀO GIỎ & ĐẶT HÀNG NGAY' để checkout nhanh.", "info");
             }
         }
-        // 6. Nếu đang ở trang MyPage / Lịch sử xổ số
-        else if (path.includes("/mypage") || path.includes("history") || path.includes("lottery-history")) {
-            addLog("🏆 Đang ở trang MyPage / Lịch sử tài khoản.", "info");
+        // 6. Nếu đang ở trang Lịch sử xổ số (/lottery-history/) hoặc MyPage (/mypage/)
+        else if (path.includes("lottery-history") || path.includes("/mypage") || path.includes("history")) {
+            const isLotteryHistory = path.includes("lottery-history");
+            if (isLotteryHistory) {
+                addLog("🏆 Đang ở trang Lịch sử xổ số (/lottery-history/).", "info");
+            } else {
+                addLog("👤 Đang ở trang MyPage. Bấm nút [📂 Đến trang /lottery-history/] để quét kết quả trúng.", "info");
+            }
             updateActiveAccountUI();
 
             const queueStr = localStorage.getItem("pk_winning_queue");
             const queueActive = localStorage.getItem("pk_auto_buy_queue_active") === "1";
-            if (queueActive && queueStr) {
-                try {
-                    const queue = JSON.parse(queueStr);
-                    if (queue.length > 0) {
-                        addLog(`⚡ Hàng đợi tự mua đang có ${queue.length} sản phẩm cần xử lý.`, "warn");
-                    }
-                } catch(e) {}
-            }
 
-            const autoBuy = localStorage.getItem("pk_auto_buy_on_win") === "1";
-            // Tự động quét kết quả sau 2 giây khi mở MyPage
-            setTimeout(() => {
-                scanLotteryResults(autoBuy);
-            }, 2000);
+            if (isLotteryHistory) {
+                if (queueActive && queueStr) {
+                    try {
+                        const queue = JSON.parse(queueStr);
+                        if (queue.length > 0) {
+                            addLog(`⚡ HÀNG ĐỢI TỰ MUA ĐANG CHẠY: Còn ${queue.length} sản phẩm cần mua!`, "warn");
+                            addLog(`🚀 Tự động quét và bấm mua sản phẩm tiếp theo sau 2.5 giây...`, "info");
+                            setTimeout(() => {
+                                const winners = findWinningItemsOnPage();
+                                if (winners.length > 0) {
+                                    startSequentialAutoBuy(winners);
+                                } else {
+                                    addLog("⚠️ Không tìm thấy nút '注文へ進む' nào nữa. Có thể tất cả sản phẩm trúng đã được mua xong.", "info");
+                                    localStorage.removeItem("pk_winning_queue");
+                                    localStorage.removeItem("pk_auto_buy_queue_active");
+                                }
+                            }, 2500);
+                            return;
+                        }
+                    } catch(e) {}
+                }
+
+                const autoBuy = localStorage.getItem("pk_auto_buy_on_win") === "1";
+                // Tự động quét kết quả sau 2 giây khi mở lottery-history
+                setTimeout(() => {
+                    scanLotteryResults(autoBuy);
+                }, 2000);
+            }
         }
         // 7. Nếu đang ở trang nộp đơn xổ số
         else if (path.includes("lottery/apply.html")) {
