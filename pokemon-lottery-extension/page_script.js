@@ -2236,27 +2236,106 @@
 
     // 7. Tìm nút Đặt trước (予約する) hoặc Thêm vào giỏ (カートに入れる) trên trang sản phẩm
     function findAddToCartButton() {
-        const candidates = Array.from(document.querySelectorAll('button, a.btn, a[class*="btn"], input[type="submit"], input[type="button"], div[role="button"]')).filter(b => {
-            if (b.closest('#pk-auto-bot-container') || b.closest('header') || b.closest('#header')) return false;
+        // Quét TẤT CẢ các thẻ có thể là nút hoặc chứa chữ (loại trừ container bot, header, footer)
+        const candidates = Array.from(document.querySelectorAll('a, button, input, div, span, p, label')).filter(el => {
+            if (el.closest('#pk-auto-bot-container') || el.closest('header') || el.closest('#header') || el.closest('footer') || el.closest('#footer')) return false;
+            if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'HEAD', 'META'].includes(el.tagName)) return false;
             return true;
         });
 
-        // 1. Ưu tiên nút "予約する" (Các sản phẩm trúng bốc thăm luôn ở dạng Pre-order / Đặt trước)
-        const reserveBtn = candidates.find(b => {
-            const txt = (b.textContent || b.value || '').trim();
-            return txt.includes('予約する') || txt.includes('予約購入');
-        });
-        if (reserveBtn) return reserveBtn;
+        // Hàm chuẩn hóa text: loại bỏ toàn bộ khoảng trắng thường, tab, xuống dòng, dấu cách tiếng Nhật (\u3000) và &nbsp; (\u00a0)
+        const cleanText = (el) => {
+            const raw = (el.textContent || el.value || el.innerText || el.getAttribute('alt') || el.getAttribute('title') || el.getAttribute('aria-label') || '').trim();
+            return raw.replace(/[\s\u3000\u00a0\r\n\t]+/g, '');
+        };
 
-        // 2. Tìm nút "カートに入れる" (Thêm vào giỏ hàng thông thường)
-        const cartBtn = candidates.find(b => {
-            const txt = (b.textContent || b.value || '').trim();
-            return txt.includes('カートに入れる') || txt.includes('カートへ入れる');
+        // 1. ƯU TIÊN SỐ 1: Nút "予約する" (Các sản phẩm trúng bốc thăm luôn có nút Đặt trước)
+        const reserveMatches = candidates.filter(el => {
+            const txt = cleanText(el);
+            return txt === '予約する' || txt.includes('予約する') || txt.includes('予約購入');
         });
-        if (cartBtn) return cartBtn;
 
-        // 3. Fallback theo selector chuẩn Demandware
-        return document.querySelector('button.add-to-cart, button.reserve-btn, .add-to-cart, .reserve-btn, #add-to-cart');
+        if (reserveMatches.length > 0) {
+            // Sắp xếp theo độ dài text tăng dần để ưu tiên phần tử cụ thể nhất (leaf node)
+            reserveMatches.sort((a, b) => cleanText(a).length - cleanText(b).length);
+
+            // Tìm phần tử có tính năng click trực tiếp (a, button, input hoặc có class comBtn / btn)
+            const interactiveEl = reserveMatches.find(el => {
+                const tag = el.tagName;
+                const cls = (el.className || '').toString();
+                return tag === 'A' || tag === 'BUTTON' || tag === 'INPUT' ||
+                       el.getAttribute('role') === 'button' ||
+                       el.onclick ||
+                       cls.includes('comBtn') || cls.includes('Btn') || cls.includes('btn');
+            });
+            if (interactiveEl) return interactiveEl;
+
+            // Nếu text nằm trong thẻ con (span, p, div), lấy thẻ cha gần nhất là a hoặc button
+            for (const el of reserveMatches) {
+                const parentClickable = el.closest('a, button, [role="button"], form');
+                if (parentClickable && !parentClickable.closest('#pk-auto-bot-container')) {
+                    return parentClickable;
+                }
+            }
+
+            return reserveMatches[0];
+        }
+
+        // 2. ƯU TIÊN SỐ 2: Nút "カートに入れる" (Thêm vào giỏ thông thường)
+        const cartMatches = candidates.filter(el => {
+            const txt = cleanText(el);
+            return txt === 'カートに入れる' || txt.includes('カートに入れる') || txt.includes('カートへ入れる');
+        });
+
+        if (cartMatches.length > 0) {
+            cartMatches.sort((a, b) => cleanText(a).length - cleanText(b).length);
+            const interactiveEl = cartMatches.find(el => {
+                const tag = el.tagName;
+                const cls = (el.className || '').toString();
+                return tag === 'A' || tag === 'BUTTON' || tag === 'INPUT' ||
+                       el.getAttribute('role') === 'button' ||
+                       el.onclick ||
+                       cls.includes('comBtn') || cls.includes('Btn') || cls.includes('btn');
+            });
+            if (interactiveEl) return interactiveEl;
+
+            for (const el of cartMatches) {
+                const parentClickable = el.closest('a, button, [role="button"], form');
+                if (parentClickable && !parentClickable.closest('#pk-auto-bot-container')) {
+                    return parentClickable;
+                }
+            }
+
+            return cartMatches[0];
+        }
+
+        // 3. Fallback theo selector chuẩn Demandware và Pokémon Center Online
+        const fallbackSelectors = [
+            '.comBtn01',
+            '.comBtn02',
+            'a[class*="comBtn" i]',
+            'div[class*="comBtn" i]',
+            'button.add-to-cart',
+            'button.add-to-cart-global',
+            'button.reserve-btn',
+            '.add-to-cart',
+            '.reserve-btn',
+            '#add-to-cart',
+            'a[href*="Cart-AddProduct"]',
+            'form[action*="Cart-AddProduct"] button',
+            'form[action*="Cart-AddProduct"] input[type="submit"]',
+            'a[class*="reserve" i]',
+            'button[class*="reserve" i]'
+        ];
+
+        for (const sel of fallbackSelectors) {
+            const el = document.querySelector(sel);
+            if (el && !el.closest('#pk-auto-bot-container') && !el.closest('header') && !el.closest('footer')) {
+                return el;
+            }
+        }
+
+        return null;
     }
 
     // 8. Tự động xử lý từng bước của quá trình đặt hàng (/order/)
@@ -2405,7 +2484,17 @@
             return true;
         }
 
-        const addBtn = findAddToCartButton();
+        let addBtn = findAddToCartButton();
+        if (!addBtn) {
+            // Thử chờ và tìm lại tối đa 4 lần (mỗi lần 600ms) để hỗ trợ các trang load chậm / dynamic rendering
+            for (let attempt = 1; attempt <= 4; attempt++) {
+                addLog(`⏳ Chưa thấy nút, đang quét lại lần ${attempt}/4...`, "info");
+                await new Promise(r => setTimeout(r, 600));
+                addBtn = findAddToCartButton();
+                if (addBtn) break;
+            }
+        }
+
         if (!addBtn) {
             const conflictAfterNoBtn = detectCartConflictError();
             if (conflictAfterNoBtn.detected) {
@@ -2417,17 +2506,44 @@
             return false;
         }
 
-        const btnTxt = (addBtn.textContent || addBtn.value || '予約する').trim();
-        addLog(`🛒 Đang di chuột tới nút [${btnTxt}]...`, "info");
+        const btnTxt = (addBtn.textContent || addBtn.value || '予約する').trim().replace(/[\s\u3000\u00a0\r\n\t]+/g, ' ');
+        addLog(`🛒 Đã định vị thành công nút: [${btnTxt}]. Đang di chuột tới bấm...`, "info");
         addBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
         addBtn.style.outline = "4px solid #e84393";
+        addBtn.style.outlineOffset = "3px";
+        addBtn.style.boxShadow = "0 0 25px rgba(232, 67, 147, 0.8)";
+
         await new Promise(r => setTimeout(r, gaussianRandom(400, 80)));
         simulateMouseApproach(addBtn);
         addBtn.focus();
-        addBtn.click();
+
+        // Kích hoạt toàn diện các sự kiện chuột
+        const mouseEvents = ['mouseenter', 'mouseover', 'mousedown', 'mouseup', 'click'];
+        mouseEvents.forEach(evt => {
+            try {
+                addBtn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+            } catch (e) {}
+        });
+
+        try { addBtn.click(); } catch (e) {}
         if (window.$) try { window.$(addBtn).trigger('click'); } catch (e) {}
 
-        addLog(`✅ Đã bấm [${btnTxt}]! Đang kiểm tra phản hồi từ Pokémon Center...`, "info");
+        // Nếu là thẻ <a> có link thật
+        if (addBtn.tagName === 'A' && addBtn.href && !addBtn.href.startsWith('javascript:') && !addBtn.href.startsWith('#')) {
+            setTimeout(() => {
+                window.location.href = addBtn.href;
+            }, 800);
+        }
+
+        // Nếu nằm trong form submit
+        const parentForm = addBtn.closest('form');
+        if (parentForm && (addBtn.type === 'submit' || addBtn.tagName === 'BUTTON')) {
+            try {
+                parentForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            } catch (e) {}
+        }
+
+        addLog(`✅ ĐÃ BẤM [${btnTxt}]! Đang kiểm tra phản hồi từ Pokémon Center...`, "success");
 
         // Liên tục kiểm tra xem có phát sinh lỗi xung đột giỏ hàng sau khi bấm không
         let redirectedToCart = false;
