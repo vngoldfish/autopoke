@@ -397,7 +397,76 @@
                });
     }
 
-    function fillLoginForm(acc) {
+    // Hàm giả lập gõ từng ký tự giống con người thật
+    function simulateHumanType(input, text) {
+        return new Promise(async (resolve) => {
+            input.focus();
+            input.dispatchEvent(new Event('focus', { bubbles: true }));
+
+            // Xóa sạch giá trị cũ
+            try {
+                const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                setter.call(input, "");
+            } catch (e) {
+                input.value = "";
+            }
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+
+            // Gõ từng ký tự với delay ngẫu nhiên (giống người thật)
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i];
+                const keyCode = char.charCodeAt(0);
+
+                // Sự kiện keydown
+                input.dispatchEvent(new KeyboardEvent('keydown', {
+                    key: char, code: 'Key' + char.toUpperCase(),
+                    keyCode: keyCode, which: keyCode,
+                    bubbles: true, cancelable: true
+                }));
+
+                // Sự kiện keypress (deprecated nhưng vẫn cần cho F5 telemetry)
+                input.dispatchEvent(new KeyboardEvent('keypress', {
+                    key: char, code: 'Key' + char.toUpperCase(),
+                    keyCode: keyCode, which: keyCode, charCode: keyCode,
+                    bubbles: true, cancelable: true
+                }));
+
+                // Cập nhật giá trị thực
+                const currentVal = input.value + char;
+                try {
+                    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                    setter.call(input, currentVal);
+                } catch (e) {
+                    input.value = currentVal;
+                }
+
+                // Sự kiện input (quan trọng nhất cho React/Gigya)
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new InputEvent('input', {
+                    data: char, inputType: 'insertText', bubbles: true
+                }));
+
+                // Sự kiện keyup
+                input.dispatchEvent(new KeyboardEvent('keyup', {
+                    key: char, code: 'Key' + char.toUpperCase(),
+                    keyCode: keyCode, which: keyCode,
+                    bubbles: true, cancelable: true
+                }));
+
+                // Delay ngẫu nhiên giữa các phím (50-120ms, giống tốc độ gõ người thật)
+                const delay = 50 + Math.floor(Math.random() * 70);
+                await new Promise(r => setTimeout(r, delay));
+            }
+
+            // Kích hoạt change sau khi gõ xong
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            input.dispatchEvent(new Event('blur', { bubbles: true }));
+
+            resolve();
+        });
+    }
+
+    async function fillLoginForm(acc) {
         if (!acc) return false;
         const emailInput = findLoginEmailInput();
         const pwdInput = findLoginPasswordInput();
@@ -407,55 +476,54 @@
             return false;
         }
 
-        addLog(`Đang tự điền Email và Mật khẩu cho [${acc.name || acc.pokemon_email}]...`, "info");
+        addLog(`⌨️ Đang giả lập gõ phím Email cho [${acc.name || acc.pokemon_email}]...`, "info");
+        await simulateHumanType(emailInput, acc.pokemon_email || "");
+        addLog(`✅ Đã gõ xong Email!`, "success");
 
-        // Điền email
-        emailInput.focus();
-        try {
-            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-            setter.call(emailInput, acc.pokemon_email || "");
-        } catch (e) {
-            emailInput.value = acc.pokemon_email || "";
-        }
-        emailInput.value = acc.pokemon_email || "";
-        emailInput.dispatchEvent(new Event('input', { bubbles: true }));
-        emailInput.dispatchEvent(new Event('change', { bubbles: true }));
+        // Nghỉ 300-600ms giữa 2 ô giống như tab sang ô tiếp
+        await new Promise(r => setTimeout(r, 300 + Math.floor(Math.random() * 300)));
 
-        // Điền password
-        pwdInput.focus();
-        try {
-            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-            setter.call(pwdInput, acc.pokemon_password || "");
-        } catch (e) {
-            pwdInput.value = acc.pokemon_password || "";
-        }
-        pwdInput.value = acc.pokemon_password || "";
-        pwdInput.dispatchEvent(new Event('input', { bubbles: true }));
-        pwdInput.dispatchEvent(new Event('change', { bubbles: true }));
+        addLog(`⌨️ Đang giả lập gõ phím Mật khẩu...`, "info");
+        await simulateHumanType(pwdInput, acc.pokemon_password || "");
+        addLog(`✅ Đã gõ xong Mật khẩu!`, "success");
 
+        // Cập nhật qua jQuery nếu có (backup)
         if (window.$) {
             try {
-                window.$(emailInput).val(acc.pokemon_email || "").trigger('input').trigger('change');
-                window.$(pwdInput).val(acc.pokemon_password || "").trigger('input').trigger('change');
+                window.$(emailInput).trigger('input').trigger('change');
+                window.$(pwdInput).trigger('input').trigger('change');
             } catch (e) {}
         }
 
-        addLog(`Đã điền xong Email & Mật khẩu của [${acc.name || acc.pokemon_email}]!`, "success");
+        addLog(`✅ Đã điền xong tất cả!`, "success");
+        addLog(``, "info");
+        addLog(`👆 BÂY GIỜ HÃY BẤM CHUỘT VÀO NÚT ĐĂNG NHẬP (ログイン) TRÊN TRANG WEB!`, "warn");
+        addLog(`⚠️ KHÔNG dùng nút tự động - phải bấm chuột thật lên nút cam/đỏ của trang web!`, "warn");
+
+        // Highlight nút đăng nhập trên trang web để dễ nhận diện
+        const loginBtn = findLoginSubmitButton();
+        if (loginBtn) {
+            loginBtn.style.outline = "4px solid #ff4757";
+            loginBtn.style.outlineOffset = "3px";
+            loginBtn.style.boxShadow = "0 0 20px rgba(255, 71, 87, 0.6)";
+            addLog(`🔴 Nút đăng nhập đã được tô viền đỏ nổi bật trên trang web!`, "info");
+        }
+
         return true;
     }
 
     function submitLoginForm() {
-        const btn = findLoginSubmitButton();
-        if (btn) {
-            addLog(`Đang tự động bấm nút Đăng nhập: "${(btn.textContent || btn.value || '').trim()}"...`, "info");
-            btn.focus();
-            btn.click();
-            if (window.$) {
-                try { window.$(btn).trigger('click'); } catch (e) {}
-            }
-            addLog("Đã gửi yêu cầu đăng nhập! Đang chờ chuyển hướng...", "success");
-        } else {
-            addLog("Đã điền xong! Vui lòng bấm nút 'ログイン' trên màn hình.", "warn");
+        // KHÔNG TỰ ĐỘNG BẤM NÚT NỮA - để người dùng bấm chuột thật
+        // F5 Volterra WAF sẽ chặn nếu phát hiện isTrusted=false từ .click()
+        addLog(`👆 HÃY BẤM CHUỘT THẬT VÀO NÚT ĐĂNG NHẬP (ログイン) TRÊN TRANG WEB!`, "warn");
+        addLog(`⚠️ Extension không thể tự bấm vì hệ thống chống bot sẽ chặn.`, "info");
+
+        const loginBtn = findLoginSubmitButton();
+        if (loginBtn) {
+            loginBtn.style.outline = "4px solid #ff4757";
+            loginBtn.style.outlineOffset = "3px";
+            loginBtn.style.boxShadow = "0 0 20px rgba(255, 71, 87, 0.6)";
+            loginBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
     }
 
@@ -1522,13 +1590,13 @@
         // Xử lý trang Đăng nhập
         const btnDoLogin = document.getElementById("pk-btn-do-login");
         if (btnDoLogin) {
-            btnDoLogin.addEventListener("click", () => {
+            btnDoLogin.addEventListener("click", async () => {
                 const acc = getActiveAccount();
-                if (fillLoginForm(acc)) {
-                    setTimeout(() => {
-                        submitLoginForm();
-                    }, 500);
-                }
+                btnDoLogin.disabled = true;
+                btnDoLogin.textContent = "⌨️ Đang gõ phím...";
+                await fillLoginForm(acc);
+                btnDoLogin.disabled = false;
+                btnDoLogin.textContent = "🔑 TỰ ĐIỀN & BẤM ĐĂNG NHẬP";
             });
         }
         const autoLoginToggle = document.getElementById("pk-auto-login-toggle");
@@ -1659,14 +1727,16 @@
             const activeAcc = getActiveAccount();
             const shouldAutoLogin = localStorage.getItem("pk_auto_login") === "1";
 
-            setTimeout(() => {
-                if (fillLoginForm(activeAcc) && shouldAutoLogin) {
-                    addLog("Tự động đăng nhập sau 1.5 giây...", "info");
-                    setTimeout(() => {
-                        submitLoginForm();
-                    }, 1500);
-                }
-            }, 800);
+            if (shouldAutoLogin && activeAcc) {
+                // Đợi 5 giây cho F5 WAF telemetry scripts khởi tạo xong
+                addLog("⏳ Đợi 5 giây cho trang tải hoàn tất trước khi điền...", "info");
+                setTimeout(async () => {
+                    await fillLoginForm(activeAcc);
+                    // KHÔNG TỰ BẤM NÚT - để người dùng bấm chuột thật
+                }, 5000);
+            } else if (activeAcc) {
+                addLog("Đã tải tài khoản. Bấm nút '🔑 TỰ ĐIỀN' khi bạn sẵn sàng.", "info");
+            }
         }
         // 2. Nếu đang ở trang nhập mã OTP
         else if (path.includes("mfa") || path.includes("passcode")) {
